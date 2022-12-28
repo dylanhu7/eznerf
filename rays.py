@@ -5,13 +5,13 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
     """Returns a tensor of rays for the given image size, camera angle, and transform matrix.
 
     Args:
-        image_width (int): The width of the image
-        image_height (int): The height of the image
-        camera_angle_x (float): The horizontal field of view of the camera in radians
-        transform_matrix (torch.Tensor): The pose of the camera
+        image_width (int): The width of the image.
+        image_height (int): The height of the image.
+        camera_angle_x (float): The horizontal field of view of the camera in radians.
+        transform_matrix (torch.Tensor): The pose of the camera.
 
     Returns:
-        torch.Tensor: A tensor of rays of shape (image_height, image_width, 3, 2), where the last dimension partitions the origins and directions
+        torch.Tensor: A tensor of rays of shape (image_height, image_width, 3, 2), where the last dimension partitions the origins and directions.
     """
     # Create tensors of pixel indices
     # j is (0, 1, ..., image_width - 1)
