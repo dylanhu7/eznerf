@@ -25,8 +25,10 @@ def sample_stratified(rays: torch.Tensor, near=2., far=6., num_samples=64) -> to
     # Linearly interpolate between near and far plane
     # (image_height, image_width, num_samples)
     strata = torch.linspace(near, far - stratum_width, num_samples)
+
     # Randomly sample one point per stratum
     # (image_height, image_width, num_samples)
     t = strata + torch.rand_like(strata) * stratum_width
+
     # (image_height, image_width, num_samples, 3)
     return rays_o[..., None, :] + t[..., None] * rays_d[..., None, :]
