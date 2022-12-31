@@ -1,31 +1,70 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 import torch.utils
 import torch.utils.data
 import torch.backends.mps
-from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
-from load_data import get_data_loader
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+
+from model import NeRF
+from data import get_data_loader, Frame, NeRFDataset
 from encoder import Encoder
+from rays import get_rays
+from sample import sample_stratified
 
 
-class NeRF(nn.Module):
-    def __init__(self):
-        super(NeRF, self).__init__()
-        self.encoder = Encoder(num_bands=10, max_freq=10)
+def train(model: NeRF, device: torch.device, train_loader: torch.utils.data.DataLoader[Frame], optimizer: torch.optim.Optimizer, epoch: int):
+    model.train()
+    dataset: NeRFDataset = train_loader.dataset  # type: ignore
+    idx = 0
+    for batch_idx, frame in enumerate(train_loader):
+        if idx == 1:
+            break
+        frame: Frame
+        target_image = frame['image']
+        rays = get_rays(dataset.image_width, dataset.image_height,
+                        dataset.camera_angle_x, frame['transform_matrix'])  # (image_height, image_width, 3, 2)
+        rays_o, rays_d = rays[..., 0], rays[..., 1]
+        x_encoder = Encoder(model.x_num_bands)
+        d_encoder = Encoder(model.d_num_bands)
+        points = sample_stratified(rays)  # (H, W, num_samples, 3)
+        # (H, W, num_samples, 3 + 3 * 2 * x_num_bands)
+        x_encoded = x_encoder(points)
+        # normalize the directions
+        rays_d = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
+        # (H, W, 3 + 3 * 2 * d_num_bands)
+        d_encoded: torch.Tensor = d_encoder(rays_d)
+        # (H, W, num_samples, 3 + 3 * 2 * x_num_bands + 3 + 3 * 2 * d_num_bands)
+        d_encoded: torch.Tensor = d_encoded[..., None, :].expand(
+            x_encoded.shape[:-1] + (d_encoded.shape[-1],))
+        input = torch.cat([x_encoded, d_encoded], dim=-1)
 
-    def forward(self, x):
-        pass
+        optimizer.zero_grad()
+        output = model(input)
+        rgb, sigma = output[..., :3], output[..., 3]
+
+        # TODO: render image
+        image = torch.zeros_like(target_image)
+
+        loss = F.mse_loss(image, target_image)
+        loss.backward()
+        optimizer.step()
+        if batch_idx % 10 == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(frame), len(dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+        idx += 1
 
 
 def main():
-    model = NeRF()
-    train_loader, train_dataset = get_data_loader(
-        "data/nerf_synthetic/lego/transforms_train.json", 100, False)
-    test_loader, test_dataset = get_data_loader(
-        "data/nerf_synthetic/lego/transforms_test.json", 100, False)
+    model = NeRF(10, 4)
+    train_loader = get_data_loader(
+        "data/nerf_synthetic/lego/transforms_train_100x100.json", train=True, shuffle=False, batch_size=None)
+
+    # train the model
+    for epoch in range(1):
+        train(model, torch.device("mps"), train_loader, torch.optim.Adam(
+            model.parameters()), epoch)
 
 
 if __name__ == '__main__':
