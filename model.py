@@ -47,8 +47,8 @@ class NeRF(nn.Module):
         output = x.clone()
         sigma = torch.empty(0)
         for layer_name in self.layers:
-            print(layer_name)
-            print(output.shape)
+            # print(layer_name)
+            # print(output.shape)
             layer = self.layers[layer_name]
             output: Tensor = layer(output)
             if "sigmaout" in layer_name:
