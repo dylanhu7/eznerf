@@ -22,51 +22,49 @@ def train_func(model: NeRF, device: torch.device, train_loader: torch.utils.data
         model.train()
         dataset: NeRFDataset = train_loader.dataset  # type: ignore
         for batch_idx, frame in enumerate(train_loader):
-            if batch_idx == 1:
-                break
             frame: Frame
 
+            # (image_height, image_width, 3, 2)
             rays = get_rays(dataset.image_width, dataset.image_height,
-                            dataset.camera_angle_x, frame['transform_matrix']).to(device)  # (image_height, image_width, 3, 2)
-            rays_d = rays[..., 1].to(device)
+                            dataset.camera_angle_x, frame['transform_matrix'].to(device))
+            # (image_height, image_width, 3)
+            rays_d = rays[..., 1]
             # normalize the directions
             rays_d = rays_d / \
-                torch.norm(rays_d, dim=-1, keepdim=True).to(device)
+                torch.norm(rays_d, dim=-1, keepdim=True)
 
             # (H, W, num_samples, 3), (H, W, num_samples)
             points, t = sample_stratified(rays)
-            points = points.to(device)
-            t = t.to(device)
 
             # (H, W, num_samples, 3 + 3 * 2 * x_num_bands)
-            x_encoded = model.x_encoder(points).to(device)
+            x_encoded = model.x_encoder(points)
             # (H, W, 3 + 3 * 2 * d_num_bands)
-            d_encoded: torch.Tensor = model.d_encoder(rays_d).to(device)
+            d_encoded: torch.Tensor = model.d_encoder(rays_d)
             # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
             d_encoded: torch.Tensor = d_encoded[..., None, :].expand(
-                x_encoded.shape[:-1] + (d_encoded.shape[-1],)).to(device)
+                x_encoded.shape[:-1] + (d_encoded.shape[-1],))
 
-            input = torch.cat([x_encoded, d_encoded], dim=-1).to(device)
+            input = torch.cat([x_encoded, d_encoded], dim=-1)
             # (H * W * num_samples, 3 + 3 * 2 * (x_num_bands + d_num_bands)
-            input = input.reshape(-1, input.shape[-1]).to(device)
+            input = input.reshape(-1, input.shape[-1])
 
             output = []
-            batch_size = 2048
+            batch_size = 1024
             for i in range(0, input.shape[0], batch_size):
-                output.append(model(input[i:i+batch_size]).to(device))
-            output = torch.cat(output, dim=0).to(device)
+                output.append(model(input[i:i+batch_size]))
+            output = torch.cat(output, dim=0)
 
             # (H * W * num_samples, 3), (H * W * num_samples)
-            rgb, sigma = output[..., :3].to(device), output[..., 3].to(device)
+            rgb, sigma = output[..., :3], output[..., 3]
             # (H, W, num_samples, 3)
             rgb = rgb.reshape(
-                (points.shape[0], points.shape[1], points.shape[2], 3)).to(device)
+                (points.shape[0], points.shape[1], points.shape[2], 3))
             # (H, W, num_samples)
             sigma = sigma.reshape(
-                (points.shape[0], points.shape[1], points.shape[2])).to(device)
+                (points.shape[0], points.shape[1], points.shape[2]))
 
             # (H, W, 3)
-            image = volume_render(rgb, sigma, t, rays_d).to(device)
+            image = volume_render(rgb, sigma, t, rays_d)
             # (3, H, W)
             image = image.permute(2, 0, 1)
 
@@ -77,7 +75,7 @@ def train_func(model: NeRF, device: torch.device, train_loader: torch.utils.data
             # Divide by 255.0 to normalize to [0, 1]
             target_image = target_image / 255.0
 
-            loss = F.mse_loss(image, target_image).to(device)
+            loss = F.mse_loss(image, target_image)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -106,12 +104,13 @@ def main():
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device(
         "mps") if torch.backends.mps.is_available() else torch.device("cpu")
+    print(f"Using device: {device}")
     # torch._dynamo.config.verbose = True
     # torch.set_float32_matmul_precision("high")
     # torch._dynamo.config.suppress_errors = True
     model = NeRF(10, 4).to(device)
     train_loader = get_data_loader(
-        "data/nerf_synthetic/lego/transforms_train_64x64.json", train=True, shuffle=False, batch_size=None)
+        "data/nerf_synthetic/lego/transforms_train_80x80.json", train=True, shuffle=True, batch_size=None)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
     train = train_func(model, device, train_loader, optimizer)
@@ -124,7 +123,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-            }, f'checkpoint_{epoch}.pt')
+            }, f'checkpoints/checkpoint_{epoch}.pt')
 
 
 if __name__ == '__main__':

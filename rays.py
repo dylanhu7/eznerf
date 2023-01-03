@@ -19,6 +19,8 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
     j, i = torch.meshgrid(torch.arange(image_width),
                           torch.arange(image_height),
                           indexing='xy')
+    j = j.to(transform_matrix.device)
+    i = i.to(transform_matrix.device)
 
     # Calculate view plane width assuming view plane is at z = -1 in camera space
     view_plane_width = 2 * torch.tan(torch.tensor(camera_angle_x) / 2)
