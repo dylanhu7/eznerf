@@ -5,7 +5,7 @@ import torch.backends.mps
 from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from torch import _dynamo
+# from torch import _dynamo
 from torchvision import io
 
 from model import NeRF
@@ -58,7 +58,6 @@ def train(model: NeRF, device: torch.device, train_loader: torch.utils.data.Data
         sigma = sigma.reshape(
             (points.shape[0], points.shape[1], points.shape[2])).to(device)
 
-        # TODO: render image
         image = volume_render(rgb, sigma, t, rays_d).to(device)
         image = image.permute(2, 0, 1)
 
@@ -78,24 +77,25 @@ def train(model: NeRF, device: torch.device, train_loader: torch.utils.data.Data
             with open(f'{batch_idx}.png', 'w+') as f:
                 io.write_png(image, f'{batch_idx}.png')
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(frame), len(dataset),
+                epoch, batch_idx, len(dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         # idx += 1
 
 
 def main():
-    device = torch.device("cuda")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device(
+        "mps") if torch.backends.mps.is_available() else torch.device("cpu")
     # torch._dynamo.config.verbose = True
     # torch.set_float32_matmul_precision("high")
     # torch._dynamo.config.suppress_errors = True
     model = NeRF(10, 4).to(device)
     train_loader = get_data_loader(
         "data/nerf_synthetic/lego/transforms_train_64x64.json", train=True, shuffle=False, batch_size=None)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
     # train the model
     for epoch in range(100):
-        train(model, device, train_loader, torch.optim.Adam(
-            model.parameters()), epoch)
+        train(model, device, train_loader, optimizer, epoch)
 
 
 if __name__ == '__main__':
