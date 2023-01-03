@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from encoder import Encoder
 
 
 class NeRF(nn.Module):
@@ -9,6 +10,7 @@ class NeRF(nn.Module):
         self,
         x_num_bands: int,
         d_num_bands: int,
+        make_encoders: bool = True
     ):
         super(NeRF, self).__init__()
         self.x_num_bands = x_num_bands
@@ -16,6 +18,10 @@ class NeRF(nn.Module):
         # 3-dimensional raw xyz coordinates and x_num_bands * 2 (sin and cos) encoded coordinates
         self.x_dim = 3 + 3 * 2 * x_num_bands
         self.d_dim = 3 + 3 * 2 * d_num_bands
+
+        if make_encoders:
+            self.x_encoder = Encoder(x_num_bands)
+            self.d_encoder = Encoder(d_num_bands)
 
         def relu_layer(in_features: int, out_features: int) -> nn.Module:
             return nn.Sequential(
@@ -44,7 +50,7 @@ class NeRF(nn.Module):
 
     def forward(self, input: Tensor) -> Tensor:
         x, d = torch.split(input, [self.x_dim, self.d_dim], dim=-1)
-        output = x.clone()
+        output = x
         sigma = torch.empty(0)
         for layer_name in self.layers:
             # print(layer_name)
