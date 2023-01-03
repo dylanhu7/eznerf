@@ -3,11 +3,9 @@ import torch
 import torch.utils
 import torch.utils.data
 import torch.backends.mps
-from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
-# from torch import _dynamo
 from torchvision import io
+import glob
 
 from model import NeRF
 from data import get_data_loader, Frame, NeRFDataset
@@ -81,9 +79,6 @@ def train_func(model: NeRF, device: torch.device, train_loader: torch.utils.data
             optimizer.zero_grad()
 
             if batch_idx % 10 == 0:
-                # make output directory if it doesn't exist
-                if not os.path.exists('output'):
-                    os.makedirs('output')
                 with open(file := f'output/{batch_idx}.png', 'w+'):
                     image = image * 255.0 + 0.5
                     image = image.to(torch.uint8)
@@ -101,22 +96,32 @@ def train_func(model: NeRF, device: torch.device, train_loader: torch.utils.data
 def main():
     if not os.path.exists('checkpoints'):
         os.makedirs('checkpoints')
+    if not os.path.exists('output'):
+        os.makedirs('output')
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device(
         "mps") if torch.backends.mps.is_available() else torch.device("cpu")
     print(f"Using device: {device}")
-    # torch._dynamo.config.verbose = True
-    # torch.set_float32_matmul_precision("high")
-    # torch._dynamo.config.suppress_errors = True
     model = NeRF(10, 4).to(device)
     train_loader = get_data_loader(
         "data/nerf_synthetic/lego/transforms_train_80x80.json", train=True, shuffle=True, batch_size=None)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
+    # Find latest checkpoint
+    epoch: int = 0
+    checkpoints = glob.glob("checkpoints/checkpoint_*.pt")
+    if len(checkpoints) > 0:
+        checkpoints.sort()
+        checkpoint = torch.load(checkpoints[-1])
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        epoch = checkpoint['epoch']
+        print(f"Loaded checkpoint {checkpoints[-1]}")
+
     train = train_func(model, device, train_loader, optimizer)
 
     # Train the model
-    for epoch in range(1000):
+    for epoch in range(epoch + 1, 1000):
         train(epoch)
         if epoch % 10 == 0:
             torch.save({
