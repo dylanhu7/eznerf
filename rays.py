@@ -1,7 +1,7 @@
 import torch
 
 
-def get_rays(image_width: int, image_height: int, camera_angle_x: float, transform_matrix: torch.Tensor) -> torch.Tensor:
+def get_rays(image_width: int, image_height: int, camera_angle_x: float, transform_matrix: torch.Tensor, normalize_directions=True) -> torch.Tensor:
     """Returns a tensor of rays for the given image size, camera angle, and transform matrix.
 
     Args:
@@ -9,6 +9,8 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
         image_height (int): The height of the image.
         camera_angle_x (float): The horizontal field of view of the camera in radians.
         transform_matrix (torch.Tensor): The pose of the camera.
+        normalize_directions (bool, optional): Whether to normalize the directions.
+            Defaults to True.
 
     Returns:
         torch.Tensor: A tensor of rays of shape (image_height, image_width, 3, 2), where the last dimension partitions the origins and directions.
@@ -34,7 +36,7 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
         view_plane_height - view_plane_height / \
         2  # (image_height, image_width)
     # View plane is at z = -1 in camera space
-    z = -torch.ones_like(i)  # (image_height, image_width)
+    z = -torch.ones_like(i).to(torch.int32)  # (image_height, image_width)
 
     # Non-normalized camera space directions
     # Length of direction vector is proportional to corresponding view plane position's distance from the camera
@@ -50,6 +52,10 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
 
     # Translation is broadcasted to (image_height, image_width, 3)
     origins = translation[None, None, ...].expand_as(directions)
+
+    if normalize_directions:
+        # Normalize direction vectors
+        directions = torch.nn.functional.normalize(directions, dim=-1)
 
     # (image_height, image_width, 3, 2)
     return torch.stack([origins, directions], dim=-1)
