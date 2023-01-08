@@ -53,9 +53,5 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, transfo
     # Translation is broadcasted to (image_height, image_width, 3)
     origins = translation[None, None, ...].expand_as(directions)
 
-    if normalize_directions:
-        # Normalize direction vectors
-        directions = torch.nn.functional.normalize(directions, dim=-1)
-
     # (image_height, image_width, 3, 2)
     return torch.stack([origins, directions], dim=-1)
