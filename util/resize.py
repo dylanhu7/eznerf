@@ -1,7 +1,7 @@
 import json
 import os
 import cv2
-from data import PathFrame
+from dataloader.data import PathFrame
 import argparse
 
 

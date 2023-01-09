@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-from encoder import Encoder
+from encoder.encoder import Encoder
 
 
 class NeRF(nn.Module):

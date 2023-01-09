@@ -8,11 +8,11 @@ from torch import Tensor
 from torchvision import io
 import glob
 
-from model import NeRF
-from data import get_data_loader, Frame, NeRFDataset
-from rays import get_rays
-from sample import sample_stratified, sample_hierarchical
-from render import volume_render
+from model.model import NeRF
+from dataloader.data import get_data_loader, Frame, NeRFDataset
+from rays.rays import get_rays
+from sample.sample import sample_stratified, sample_hierarchical
+from render.render import volume_render
 
 
 def train_func(model: NeRF, device: torch.device, train_loader: torch.utils.data.DataLoader[Frame], optimizer: torch.optim.Optimizer):
