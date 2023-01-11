@@ -1,11 +1,11 @@
-import json
 import os
-import cv2
-from dataloader.data import PathFrame
 import argparse
+import json
+
+import cv2
 
 
-def resize(path: str, size: tuple[int, int], image_suffix='', depth_suffix='_depth_0001.png', normal_suffix='_normal_0001.png', extension='.png'):
+def resize(path: str, size: tuple[int, int], image_suffix, depth_suffix, normal_suffix, extension):
     """Resizes the images in the dataset to the given size and generates a new JSON file.
 
     Args:
@@ -23,13 +23,14 @@ def resize(path: str, size: tuple[int, int], image_suffix='', depth_suffix='_dep
     # Read the JSON file and get the camera angle and frames.
     with open(path, 'r') as f:
         data = json.load(f)
-    frames: list[PathFrame] = data['frames']
+    frames = data['frames']
     images_directory = os.path.join(
         # path to directory of JSON file
         os.path.abspath(os.path.join(path, os.pardir)),
         os.path.dirname(os.path.relpath(
             frames[0]['file_path'])) + f'_{size[0]}x{size[1]}')  # directory of resized images
     os.makedirs(images_directory, exist_ok=True)
+    image_suffix = image_suffix if image_suffix is not None else ''
     image_suffix = image_suffix + extension
     depth_suffix = depth_suffix + extension
     normal_suffix = normal_suffix + extension
@@ -66,7 +67,7 @@ def main():
     parser.add_argument('path', type=str, help='path to dataset JSON file')
     parser.add_argument('width', type=int, help='width to resize images to')
     parser.add_argument('height', type=int, help='height to resize images to')
-    parser.add_argument('--image-suffix', type=str, default='',
+    parser.add_argument('--image-suffix', type=str, default=None,
                         help='suffix of images')
     parser.add_argument('--depth-suffix', type=str, default='_depth_0001',
                         help='suffix of depth maps')
