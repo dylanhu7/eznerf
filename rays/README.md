@@ -120,4 +120,56 @@ The view plane is subdivided according to the dimensions of the image we are ren
 We now have all the pieces we need to generate rays through the scene.
 
 We can generate rays in the following way:
-1. Determine the position of each pixel center on the view plane.
+1. Determine the position of each pixel center on the view plane in camera space.
+2. Calculate the direction of each ray in camera space (spoiler: this is *really* easy).
+3. Rotate our direction vectors using the upper left 3x3 rotation matrix from the pose matrix.
+4. Translate our ray origin from the origin to the camera position using the upper right 3x1 translation vector from the pose matrix (this is also *really* easy).
+
+> Note: camera space represents the coordinate system from the perspective of the camera. The camera is located at the origin, and the $z$ axis points at the camera (the camera looks down the negative $z$ axis).
+
+### Finding Pixel Centers
+Assuming we place the view plane a distance $k = 1$ from the camera, we can find the position of the center of each pixel on the view plane with the following steps, which are reflected in code:
+
+1. Calculate the width of the view plane $\Chi$ using trigonometric properties:
+   ```math
+   \Chi = 2k \tan\frac{\theta_x}{2}
+   ```
+   where $\theta_x$ is the horizontal field of view of the camera.
+
+   > If you aren't sure where this came from, try to derive it yourself!
+2. Calculate the height of the view plane $\Upsilon$ by dividing by the aspect ratio of the image:
+    ```math
+    \Upsilon = \Chi \cdot \frac{H}{W}
+    ```
+    where $H$ and $W$ are the height and width of the image in pixels, respectively.
+3. Generate $i,j$ pixel indices in $[0, W-1]$ and $[0, H-1]$, respectively.
+4. Calculate $x,y$ coordinates on the view plane:
+   ```math
+   x = \left(\frac{j + 0.5}{W}\right)\Chi - \frac{\Chi}{2}, \quad y = \left(\frac{H - 1 - i + 0.5}{H}\right)\Upsilon - \frac{\Upsilon}{2}
+   ```
+   > Note: we add 0.5 to i and j because we want to shoot rays through pixel *centers*.
+
+   Trivially, as we are in camera space:
+   ```math
+   z = -k
+   ```
+
+### Calculating Camera Space Ray Directions
+Since we are in camera space and the camera (the origin of our rays) is at $(0, 0, 0)$, the direction of each ray is simply the position of the pixel center on the view plane.
+
+We don't need to do *any* transformation to turn these view plane coordinates into ray directions in camera space.
+
+### Rotate Ray Directions
+We now have the directions of our rays in camera space. We can rotate these directions by multiplying them by the upper left 3x3 rotation matrix from the pose matrix.
+
+> Notice that we *do not* normalize the ray directions. While in most applications of computer graphics we appreciate normalized direction vectors, having direction vectors whose lengths are proportional to the corresponding view plane point's distance from the camera is useful for our application.
+> When we sample along the rays, we can apply the same sampling procedure to all rays, and the length of the direction vector handles the scaling of the sampling range.
+
+### Translate Ray Origin
+We can translate our ray origin in camera space, which is $(0, 0, 0)$, to the world space camera position by adding the upper right 3x1 translation vector from the pose matrix. However, since we are adding to a zero vector, the 3x1 translation vector *is* the camera position in world space.
+
+## Next Steps
+We have now generated rays through the scene. The next step is to *sample* the scene along these rays to generate points which will be fed into the neural network. Check out the [`sample.py` README](../sample/README.md) to see how this is done!
+
+## Credits
+Much of the content here is from [Brown CS1230](https://cs1230.graphics), who have done a wonderful job presenting these (and other computer graphics) concepts.
