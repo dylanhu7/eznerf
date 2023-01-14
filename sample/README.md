@@ -159,4 +159,4 @@ return rays_o[..., None, :] + t[..., None] * rays_d[..., None, :], t
 > We also return the $t$ values of each sample for use in volume rendering.
 
 ## Next Steps
-After we generate the hierarchical samples, we return to the training loop and render the image using the stratified and hierarchical samples. We then compute the loss and backpropagate the gradients. We then update the parameters of the network and repeat the process.
+After we generate the hierarchical samples, we return to the training loop and pass our points (and directions) into the MLP. The output is then used to volume render the scene.
