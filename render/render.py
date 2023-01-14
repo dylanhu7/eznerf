@@ -2,15 +2,18 @@ import torch
 from torch import Tensor
 
 
-def volume_render(rgb: Tensor, sigma: Tensor, t_vals: Tensor, white_bkgd=False) -> tuple[Tensor, Tensor, Tensor]:
+def volume_render(rgb: Tensor,
+                  sigma: Tensor,
+                  t_vals: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     """Volume renders a radiance field.
 
     Args:
-        rgb (Tensor): [image_height, image_width, num_samples, 3] The RGB color of each point.
-        sigma (Tensor): [image_height, image_width, num_samples] The volume density of each point.
-        t_vals (Tensor): [num_samples] The t-values along each ray.
-        white_bkgd (bool, optional): Whether to render a white background.
-            Defaults to False (black background).
+        rgb (Tensor): [image_height, image_width, num_samples, 3]
+            The RGB color of each point.
+        sigma (Tensor): [image_height, image_width, num_samples]
+            The volume density of each point.
+        t_vals (Tensor): [num_samples]
+            The t-values along each ray.
     Returns:
         Tensor: [image_height, image_width, 3] RGB color of each pixel.
     """

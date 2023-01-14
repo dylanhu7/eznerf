@@ -1,20 +1,27 @@
+from typing import Callable
+
 import torch
 import torch.backends.mps
 import torch.nn.functional as F
 from torch import Tensor
-from torch.utils.data import DataLoader
 from torch.optim import Optimizer
+from torch.utils.data import DataLoader
 from torchvision import io
 
-from model.model import NeRF
 from dataloader.data import Frame, NeRFDataset
+from model.model import NeRF
 from rays.rays import get_rays
-from sample.sample import sample_stratified, sample_hierarchical
 from render.render import volume_render
+from sample.sample import sample_hierarchical, sample_stratified
 
 
-def train_func(model: NeRF, device: torch.device, train_loader: DataLoader[Frame], optimizer: Optimizer):
-    def run_nerf(points: Tensor, rays_d: Tensor, t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+def train_func(model: NeRF,
+               device: torch.device,
+               train_loader: DataLoader[Frame],
+               optimizer: Optimizer) -> Callable[[int], None]:
+    def run_nerf(points: Tensor,
+                 rays_d: Tensor,
+                 t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         x_encoded = model.x_encoder(points)
         d_encoded = model.d_encoder(rays_d)
         # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
@@ -94,5 +101,9 @@ def train_func(model: NeRF, device: torch.device, train_loader: DataLoader[Frame
                     target_image = target_image.to(torch.uint8).cpu()
                     io.write_png(target_image, file)
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx, len(dataset), 100. * batch_idx / len(train_loader), loss.item()))
+                    epoch,
+                    batch_idx,
+                    len(dataset),
+                    100. * batch_idx / len(train_loader),
+                    loss.item()))
     return train_epoch
