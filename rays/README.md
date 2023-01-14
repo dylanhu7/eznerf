@@ -131,27 +131,20 @@ We can generate rays in the following way:
 Assuming we place the view plane a distance $k = 1$ from the camera, we can find the position of the center of each pixel on the view plane with the following steps, which are reflected in code:
 
 1. Calculate the width of the view plane $X$ using trigonometric properties:
-```math
-X = 2k \tan\frac{\theta_x}{2}
-```
-where $\theta_x$ is the horizontal field of view of the camera.
-> If you aren't sure where this came from, try to derive it yourself!
+    $$X = 2k \tan\frac{\theta_x}{2}$$
+    where $\theta_x$ is the horizontal field of view of the camera.
+    
+    > If you aren't sure where this came from, try to derive it yourself!
 2. Calculate the height of the view plane $Y$ by dividing by the aspect ratio of the image:
-```math
-Y = X \cdot \frac{H}{W}
-```
-where $H$ and $W$ are the height and width of the image in pixels, respectively.
+    $$Y = X \cdot \frac{H}{W}$$$
+    where $H$ and $W$ are the height and width of the image in pixels, respectively.
 3. Generate $i,j$ pixel indices in $[0, W-1]$ and $[0, H-1]$, respectively.
 4. Calculate $x,y$ coordinates on the view plane:
-```math
-x = \left(\frac{j + 0.5}{W}\right)X - \frac{X}{2}, \quad y = \left(\frac{H - 1 - i + 0.5}{H}\right)Y - \frac{Y}{2}
-```
-   > Note: we add 0.5 to i and j because we want to shoot rays through pixel *centers*.
-
-   Trivially, as we are in camera space:
-```math
-z = -k
-```
+    $$x = \left(\frac{j + 0.5}{W}\right)X - \frac{X}{2}, \quad y = \left(\frac{H - 1 - i + 0.5}{H}\right)Y - \frac{Y}{2}$$
+    > Note: we add 0.5 to i and j because we want to shoot rays through pixel *centers*.
+    
+    Trivially, as we are in camera space:
+    $$z = -k$$
 
 ### Calculating Camera Space Ray Directions
 Since we are in camera space and the camera (the origin of our rays) is at $(0, 0, 0)$, the direction of each ray is simply the position of the pixel center on the view plane.
