@@ -159,4 +159,4 @@ return rays_o[..., None, :] + t[..., None] * rays_d[..., None, :], t
 > We also return the $t$ values of each sample for use in volume rendering.
 
 ## Next Steps
-After we generate the hierarchical samples, we return to the training loop and pass our points (and directions) into the MLP. The output is then used to volume render the scene.
+After we generating samples, we return to the training loop and pass our points (and directions) into the encoder. The encoded output is then used as input to the MLP, and the returned color and volume density information is used volume render the scene.
