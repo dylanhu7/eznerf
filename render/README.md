@@ -56,9 +56,9 @@ We use these weights to generate a probability distribution in [hierarchical sam
 ## Implementation: `volume_render`
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `color` | `Tensor` | A `[image_height, image_width, num_samples, 3]` tensor of RGB color predictions from the MLP |
-| `sigma` | `Tensor` | A `[image_height, image_width, num_samples]` tensor of volume density predictions from the MLP |
-| `t` | `Tensor` | A `[num_samples]` tensor of $t$ values for each sample along the ray |
+| `color` | `Tensor` | A tensor of shape `[image_height, image_width, num_samples, 3]` containing the RGB color predictions from the MLP |
+| `sigma` | `Tensor` | A tensor of shape `[image_height, image_width, num_samples]` containing the volume density predictions from the MLP |
+| `t` | `Tensor` | A tensor of shape `[num_samples]` containing the $t$ values for each sample along the ray |
 
 First, we compute `num_samples - 1` $\delta$ values by subtracting each $t$ value from the next:
 ```py
