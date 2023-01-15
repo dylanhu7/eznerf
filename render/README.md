@@ -54,3 +54,50 @@ The intuition behind why we refer to this term as the weight is that it directly
 We use these weights to generate a probability distribution in [hierarchical sampling](../sample/README.md#hierarchical-sampling).
 
 ## Implementation: `volume_render`
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `color` | `Tensor` | A `[image_height, image_width, num_samples, 3]` tensor of RGB color predictions from the MLP |
+| `sigma` | `Tensor` | A `[image_height, image_width, num_samples]` tensor of volume density predictions from the MLP |
+| `t` | `Tensor` | A `[num_samples]` tensor of $t$ values for each sample along the ray |
+
+First, we compute `num_samples - 1` $\delta$ values by subtracting each $t$ value from the next:
+```py
+deltas = t_vals[..., 1:] - t_vals[..., :-1]
+```
+
+We then omit color and volume density values for the last sample, as we don't have a corresponding $\delta$ value for it:
+```py
+color = color[..., :-1, :]
+sigma = sigma[..., :-1]
+```
+
+We compute $\alpha_i = 1 - \exp(\sigma_i\delta_i)$ for use in computing transmittance and weights:
+```py
+alphas = 1. - torch.exp(-sigma * deltas)
+```
+
+In order to compute transmittance, we need to compute the cumulative product of $\alpha_i$ along the ray. PyTorch's [`torch.cumprod`](https://pytorch.org/docs/stable/generated/torch.cumprod.html) will get us mostly there, but we write a custom variation of it to make it "exclusive". This means that the first element of the cumulative product is 1, and the last element is the product of all elements in the input tensor except the last. This is useful for computing transmittance, as we want the first element to be 1, and the last element to be the product of all $\alpha$ values before the current $\delta$.
+```py
+def cumprod_exclusive(tensor: Tensor) -> Tensor:
+    """An exclusive cumulative product"""
+    # [image_height, image_width, num_samples]
+    return torch.cumprod(torch.cat(
+        [torch.ones_like(tensor[..., :1]), tensor[..., :-1]], dim=-1), dim=-1)
+```
+
+We can now compute the transmittance $T_i$ for each $\delta$:
+```py
+transmittance = cumprod_exclusive(1. - alphas)
+```
+
+Then we compute the weight $w_i$ for $\delta_i$ as the product of $T_i$ and $\alpha_i$:
+```py
+weights = transmittance * alphas
+```
+
+Finally, we compute the expected color of the ray by summing the product of the color and weight for each $\delta$:
+```py
+image = torch.sum(weights[..., None] * color, dim=-2)
+```
+
+Along with the rendered image, we also return the weights and deltas for use in [hierarchical sampling](../sample/README.md#hierarchical-sampling).
