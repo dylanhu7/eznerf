@@ -1,3 +1,4 @@
+import os
 from typing import Callable
 
 import torch
@@ -8,59 +9,45 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchvision import io
 
-from dataloader.data import Frame, NeRFDataset
+from dataloader.data import Frame, NeRFDataset, TestFrame
 from model.model import NeRF
 from rays.rays import get_rays
 from render.render import volume_render
 from sample.sample import sample_hierarchical, sample_stratified
 
 
-def train_func(model: NeRF,
-               device: torch.device,
-               train_loader: DataLoader[Frame],
-               optimizer: Optimizer) -> Callable[[int], None]:
-    def run_nerf(points: Tensor,
-                 rays_d: Tensor,
-                 t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        x_encoded = model.x_encoder(points)
-        d_encoded = model.d_encoder(rays_d)
-        # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
-        d_encoded: torch.Tensor = d_encoded[..., None, :].expand(
-            x_encoded.shape[:-1] + (d_encoded.shape[-1],))
+def run_func(model: NeRF,
+             device: torch.device,
+             loader: DataLoader[Frame] | DataLoader[TestFrame],
+             optimizer: Optimizer,
+             output_dir: str,
+             train: bool) -> Callable[[int], None]:
+    def run_epoch(epoch: int):
+        loss_sum = 0.
+        psnr_sum = 0.
+        losses: list[float] = []
+        psnrs: list[float] = []
+        if train:
+            model.train()
+        else:
+            model.eval()
 
-        input = torch.cat([x_encoded, d_encoded], dim=-1)
-        # (H * W * num_samples, 3 + 3 * 2 * (x_num_bands + d_num_bands))
-        input = input.reshape(-1, input.shape[-1])
-
-        output = model(input)
-
-        # (H * W * num_samples, 3), (H * W * num_samples)
-        rgb, sigma = output[..., :3], output[..., 3]
-        # (H, W, num_samples, 3)
-        rgb = rgb.reshape(
-            (list(points.shape)[:-1] + [3]))
-        # (H, W, num_samples)
-        sigma = sigma.reshape(
-            (list(points.shape)[:-1]))
-
-        # (H, W, num_samples_stratified, 3), (H, W, num_samples_stratified)
-        return volume_render(rgb, sigma, t)
-
-    def train_epoch(epoch: int):
-        model.train()
-        dataset: NeRFDataset = train_loader.dataset  # type: ignore
-        for batch_idx, frame in enumerate(train_loader):
+        dataset: NeRFDataset[Frame] = loader.dataset  # type: ignore
+        for batch_idx, frame in enumerate(loader):
+            print(batch_idx)
             frame: Frame
 
             # (image_height, image_width, 3, 2)
-            rays = get_rays(dataset.image_width, dataset.image_height,
-                            dataset.camera_angle_x, frame['transform_matrix'].to(device))
+            rays = get_rays(dataset.image_width,
+                            dataset.image_height,
+                            dataset.camera_angle_x,
+                            frame['transform_matrix'].to(device))
             # (image_height, image_width, 3)
             rays_d = rays[..., 1]
 
             # (H, W, num_samples, 3), (num_samples)
             points, t = sample_stratified(rays, 2., 6., 64)
-            _, weights, deltas = run_nerf(points, rays_d, t)
+            _, weights, deltas = run_nerf(model, points, rays_d, t)
 
             # (H, W, num_samples, 3), (H, W, num_samples)
             points_hierarchical, t_hierarchical = sample_hierarchical(
@@ -71,9 +58,7 @@ def train_func(model: NeRF,
                 t_hierarchical.shape[:-1] + (t.shape[-1],))
             t = torch.cat([t, t_hierarchical], dim=-1)
             t, _ = torch.sort(t)
-            # t, _ = torch.sort(t_hierarchical)
-            # points = points_hierarchical
-            image, _, _ = run_nerf(points, rays_d, t)
+            image, _, _ = run_nerf(model, points, rays_d, t)
 
             image = image.permute(2, 0, 1)
 
@@ -85,25 +70,64 @@ def train_func(model: NeRF,
             target_image = target_image / 255.0
 
             loss = F.mse_loss(image, target_image)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
 
-            if batch_idx % 10 == 0:
-                with open(file := f'output/{batch_idx}.png', 'w+'):
-                    image = image.detach()
-                    image = image * 255.0 + 0.5
-                    image = image.to(torch.uint8).cpu()
-                    io.write_png(image, file)
-                with open(file := f'output/{batch_idx}_target.png', 'w+'):
-                    target_image = target_image.detach()
-                    target_image = target_image * 255.0 + 0.5
-                    target_image = target_image.to(torch.uint8).cpu()
-                    io.write_png(target_image, file)
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch,
-                    batch_idx,
-                    len(dataset),
-                    100. * batch_idx / len(train_loader),
-                    loss.item()))
-    return train_epoch
+            if train:
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            else:
+                losses.append(loss := loss.item())
+                psnrs.append(
+                    psnr := 10. * torch.log10(Tensor(1. / loss)).item())
+                loss_sum += loss
+                psnr_sum += psnr
+
+                # make epoch dir if it doesn't exist
+                epoch_dir = os.path.join(output_dir, f'epoch_{epoch}')
+                if not os.path.exists(epoch_dir):
+                    os.makedirs(epoch_dir)
+
+                print(epoch_dir)
+
+                if batch_idx % 10 == 0:
+                    with open(f'{epoch_dir}/{batch_idx}.png', 'w+') as file:
+                        image = image.detach()
+                        image = image * 255.0 + 0.5
+                        image = image.to(torch.uint8).cpu()
+                        io.write_png(image, file.name)
+                    with open(f'{epoch_dir}/{batch_idx}_target.png', 'w+') as file:
+                        target_image = target_image.detach()
+                        target_image = target_image * 255.0 + 0.5
+                        target_image = target_image.to(torch.uint8).cpu()
+                        io.write_png(target_image, file.name)
+
+    return run_epoch
+
+
+def run_nerf(model: NeRF,
+             points: Tensor,
+             rays_d: Tensor,
+             t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    x_encoded = model.x_encoder(points)
+    d_encoded = model.d_encoder(rays_d)
+    # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
+    d_encoded: torch.Tensor = d_encoded[..., None, :].expand(
+        x_encoded.shape[:-1] + (d_encoded.shape[-1],))
+
+    input = torch.cat([x_encoded, d_encoded], dim=-1)
+    # (H * W * num_samples, 3 + 3 * 2 * (x_num_bands + d_num_bands))
+    input = input.reshape(-1, input.shape[-1])
+
+    output = model(input)
+
+    # (H * W * num_samples, 3), (H * W * num_samples)
+    rgb, sigma = output[..., :3], output[..., 3]
+    # (H, W, num_samples, 3)
+    rgb = rgb.reshape(
+        (list(points.shape)[:-1] + [3]))
+    # (H, W, num_samples)
+    sigma = sigma.reshape(
+        (list(points.shape)[:-1]))
+
+    # (H, W, num_samples_stratified, 3), (H, W, num_samples_stratified)
+    return volume_render(rgb, sigma, t)
