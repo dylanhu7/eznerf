@@ -48,7 +48,7 @@ def main():
                         optimizer, args.output_dir, train=False)
         for epoch in tqdm(range(epoch, epoch + args.epochs)):
             train(epoch)
-            if epoch % 10 == 0:
+            if epoch % 1 == 0:
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),

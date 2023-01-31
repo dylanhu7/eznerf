@@ -1,5 +1,6 @@
 import os
-from typing import Callable
+from typing import Callable, TypedDict
+from jinja2 import Template
 
 import torch
 import torch.backends.mps
@@ -16,17 +17,31 @@ from render.render import volume_render
 from sample.sample import sample_hierarchical, sample_stratified
 
 
+class ResultDict(TypedDict):
+    batch: int
+    loss: float
+    psnr: float
+    image: str
+    target_image: str
+
+
 def run_func(model: NeRF,
              device: torch.device,
              loader: DataLoader[Frame] | DataLoader[TestFrame],
              optimizer: Optimizer,
              output_dir: str,
              train: bool) -> Callable[[int], None]:
+    losses: list[float] = []
+    psnrs: list[float] = []
+
     def run_epoch(epoch: int):
         loss_sum = 0.
         psnr_sum = 0.
-        losses: list[float] = []
-        psnrs: list[float] = []
+        # make epoch dir if it doesn't exist
+        epoch_dir = os.path.join(output_dir, f'epoch_{epoch}')
+        if not os.path.exists(epoch_dir):
+            os.makedirs(epoch_dir)
+        results: list[ResultDict] = []
         if train:
             model.train()
         else:
@@ -82,24 +97,31 @@ def run_func(model: NeRF,
                 loss_sum += loss
                 psnr_sum += psnr
 
-                # make epoch dir if it doesn't exist
-                epoch_dir = os.path.join(output_dir, f'epoch_{epoch}')
-                if not os.path.exists(epoch_dir):
-                    os.makedirs(epoch_dir)
-
                 print(epoch_dir)
 
                 if batch_idx % 10 == 0:
-                    with open(f'{epoch_dir}/{batch_idx}.png', 'w+') as file:
+                    image_path = os.path.join(epoch_dir, f'{batch_idx}.png')
+                    target_image_path = os.path.join(
+                        epoch_dir, f'{batch_idx}_target.png')
+                    with open(image_path, 'w+') as file:
                         image = image.detach()
                         image = image * 255.0 + 0.5
                         image = image.to(torch.uint8).cpu()
                         io.write_png(image, file.name)
-                    with open(f'{epoch_dir}/{batch_idx}_target.png', 'w+') as file:
+                    with open(target_image_path, 'w+') as file:
                         target_image = target_image.detach()
                         target_image = target_image * 255.0 + 0.5
                         target_image = target_image.to(torch.uint8).cpu()
                         io.write_png(target_image, file.name)
+                    results.append(ResultDict(
+                        batch=batch_idx,
+                        loss=loss,
+                        psnr=psnr,
+                        image=image_path,
+                        target_image=target_image_path))
+
+        if not train:
+            generate_html(epoch, epoch_dir, results)
 
     return run_epoch
 
@@ -131,3 +153,10 @@ def run_nerf(model: NeRF,
 
     # (H, W, num_samples_stratified, 3), (H, W, num_samples_stratified)
     return volume_render(rgb, sigma, t)
+
+
+def generate_html(epoch: int, epoch_dir: str, results: list[ResultDict]):
+    with open('template.html.jinja', 'r') as f:
+        template = Template(f.read())
+    with open(f'{epoch_dir}/index.html', 'w+') as f:
+        f.write(template.render(epoch=epoch, results=results))
