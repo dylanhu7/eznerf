@@ -10,7 +10,7 @@ from tqdm import tqdm
 from animate.animate import animate
 from dataloader.data import get_train_loader, get_test_loader
 from model.model import NeRF
-from train.train import run_func
+from run.train import run_func
 
 
 def main():

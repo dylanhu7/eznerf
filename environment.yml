@@ -10,3 +10,5 @@ dependencies:
   - torchaudio
   - opencv
   - pytorch-cuda
+  - tqdm
+  - jinja2
