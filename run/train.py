@@ -40,7 +40,7 @@ def run_func(model: NeRF,
         # make epoch dir if it doesn't exist
         epoch_dir = os.path.join(output_dir, f'epoch_{epoch}')
         images_dir = os.path.join(epoch_dir, 'images')
-        if not os.path.exists(images_dir):
+        if not train and not os.path.exists(images_dir):
             os.makedirs(images_dir)
         results: list[ResultDict] = []
         dataset: NeRFDataset[Frame] = loader.dataset  # type: ignore
