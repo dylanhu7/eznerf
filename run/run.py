@@ -1,5 +1,5 @@
 import os
-from typing import Callable, TypedDict
+from typing import Callable, TypedDict, Optional
 from jinja2 import Template
 
 import torch
@@ -28,6 +28,7 @@ class ResultDict(TypedDict):
 def run_func(model: NeRF,
              device: torch.device,
              loader: DataLoader[Frame] | DataLoader[TestFrame],
+             num_rays: Optional[int],
              optimizer: Optimizer,
              output_dir: str,
              train: bool) -> Callable[[int], None]:
@@ -50,39 +51,56 @@ def run_func(model: NeRF,
             for batch_idx, frame in enumerate(loader):
                 frame: Frame
 
+                # (4, image_height, image_width)
+                target_image = frame['image'].to(device)
+                # Reshape to (num_pixels, 4)
+                target_image = target_image.reshape(-1, 4)
+                # Remove alpha channel: (num_pixels, 3)
+                target_image = target_image[..., :3]
+                # Divide by 255.0 to normalize to [0, 1]
+                target_image = target_image / 255.0
+
                 # (image_height, image_width, 3, 2)
                 rays = get_rays(dataset.image_width,
                                 dataset.image_height,
                                 dataset.camera_angle_x,
                                 frame['transform_matrix'].to(device))
                 # (image_height, image_width, 3)
-                rays_d = rays[..., 1]
+                rays_o, rays_d = rays[..., 0], rays[..., 1]
+
+                # Randomly select N rays
+                # print("rays", rays.shape)
+                if num_rays is not None:
+                    rays = rays.reshape(-1, 3, 2)
+                    ray_indices = torch.randperm(rays.shape[0])[:num_rays]
+                    rays = rays[ray_indices]
+                    rays_o, rays_d = rays[..., 0], rays[..., 1]
+                # print("rays_o", rays_o.shape)
+                # print("rays_d", rays_d.shape)
 
                 # (H, W, num_samples, 3), (num_samples)
                 points, t = sample_stratified(rays, 2., 6., 64)
+                # print("points", points.shape)
                 _, weights, deltas = run_nerf(model, points, rays_d, t)
+                
 
                 # (H, W, num_samples, 3), (H, W, num_samples)
                 points_hierarchical, t_hierarchical = sample_hierarchical(
                     rays, t, deltas, weights, 128)
 
-                points = torch.cat([points, points_hierarchical], dim=2)
-                t = t[None, None, :].expand(
+                points = torch.cat([points, points_hierarchical], dim=-2)
+
+                t = t.expand(
                     t_hierarchical.shape[:-1] + (t.shape[-1],))
                 t = torch.cat([t, t_hierarchical], dim=-1)
                 t, indices = torch.sort(t)
-                points = torch.gather(points, dim=-2, index=indices[..., None].expand(
+                points = torch.gather(points, -2, indices[..., None].expand(
                     indices.shape + (points.shape[-1],)))
                 image, _, _ = run_nerf(model, points, rays_d, t)
 
-                image = image.permute(2, 0, 1)
+                # print("image", image.shape)
 
-                # (4, image_height, image_width)
-                target_image = frame['image'].to(device)
-                # Remove alpha channel: (4, H, W) to (3, H, W)
-                target_image = target_image[:3, :, :]
-                # Divide by 255.0 to normalize to [0, 1]
-                target_image = target_image / 255.0
+                target_image = target_image[ray_indices]
 
                 loss = F.mse_loss(image, target_image)
 
@@ -94,7 +112,7 @@ def run_func(model: NeRF,
                     losses.append(loss_item := loss.item())
                     psnrs.append(
                         psnr := 10. * torch.log10(Tensor(1. / loss)).item())
-                    loss_sum += loss.item()
+                    loss_sum += loss_item
                     psnr_sum += psnr
 
                     if batch_idx % 10 == 0:
@@ -130,14 +148,19 @@ def run_nerf(model: NeRF,
              points: Tensor,
              rays_d: Tensor,
              t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    # (num_pixels, num_samples, 3 + 3 * 2 * x_num_bands)
     x_encoded = model.x_encoder(points)
+    # (num_pixels, 3 + 3 * 2 * d_num_bands)
     d_encoded = model.d_encoder(rays_d)
+    # print("x_encoded", x_encoded.shape)
+    # print("d_encoded", d_encoded.shape)
     # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
-    d_encoded: torch.Tensor = d_encoded[..., None, :].expand(
-        x_encoded.shape[:-1] + (d_encoded.shape[-1],))
+    d_encoded = d_encoded[..., None, :].expand(
+        d_encoded.shape[:-1] + (points.shape[-2],) + d_encoded.shape[-1:])
 
     input = torch.cat([x_encoded, d_encoded], dim=-1)
-    # (H * W * num_samples, 3 + 3 * 2 * (x_num_bands + d_num_bands))
+
+    # (H * W * num_samples, 3 + 3 + (3 * 2 * (x_num_bands + d_num_bands)))
     input = input.reshape(-1, input.shape[-1])
 
     output = model(input)

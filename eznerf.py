@@ -10,7 +10,7 @@ from tqdm import tqdm
 from animate.animate import animate
 from dataloader.data import get_train_loader, get_test_loader
 from model.model import NeRF
-from run.train import run_func
+from run.run import run_func
 
 
 def main():
@@ -36,28 +36,30 @@ def main():
         epoch = checkpoint['epoch']
         print("Loaded checkpoint")
 
-    if args.train:
+    if args.train_json:
         epoch += 1
         print(f"Starting at epoch {epoch}")
         print(f"Training for {args.epochs} epochs")
         train_loader = get_train_loader(args.train_json)
-        train = run_func(model, device, train_loader,
+        train = run_func(model, device, train_loader, args.num_rays,
                          optimizer, args.output_dir, train=True)
-        test_loader = get_test_loader(args.test_json)
-        test = run_func(model, device, test_loader,
+        if args.val_json:
+            val_loader = get_train_loader(args.val_json)
+            validate = run_func(model, device, val_loader, None,
                         optimizer, args.output_dir, train=False)
         for epoch in tqdm(range(epoch, epoch + args.epochs)):
             train(epoch)
-            if epoch % 20 == 0:
+            if epoch % 1 == 0:
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                 }, f'checkpoints/checkpoint_{epoch}.pt')
-                test(epoch)
+                if args.val_json:
+                    validate(epoch)
         print("Training complete")
 
-    if args.test:
+    if args.test_json:
         test_loader = get_test_loader(args.test_json)
         test = run_func(model, device, test_loader,
                         optimizer, args.output_dir, train=False)
@@ -71,24 +73,19 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', action='store_true')
-    parser.add_argument('--test', action='store_true')
-    parser.add_argument('--animate', action='store_true')
     parser.add_argument('--train_json', type=str, default=None)
+    parser.add_argument('--val_json', type=str, default=None)
     parser.add_argument('--test_json', type=str, default=None)
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--epochs', type=int, default=1000)
+    parser.add_argument('--num_rays', type=Optional[int], default=1024)
+    parser.add_argument('--animate', action='store_true')
     parser.add_argument('--output_dir', type=str, default='output')
     parser.add_argument('--checkpoints_dir', type=str, default='checkpoints')
     parser.add_argument('--device', type=str, default=None)
 
     args = parser.parse_args()
-
-    if args.train and args.train_json is None:
-        raise ValueError("Must specify train json file to enable training")
-    if args.test and args.test_json is None:
-        raise ValueError("Must specify test json file to enable testing")
 
     if args.resume and args.checkpoint is not None:
         raise ValueError("Cannot resume and load checkpoint at the same time")

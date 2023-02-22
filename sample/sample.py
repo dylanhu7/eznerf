@@ -28,6 +28,9 @@ def sample_stratified(rays: Tensor, near: float, far: float, num_samples: int) -
     # Randomly sample one point per stratum
     # [num_samples]
     t = strata + torch.rand_like(strata) * stratum_width
+    
+    # print('t', t[..., None].shape)
+    # print("ddd", rays_d[..., None, :].shape)
 
     # [image_height, image_width, num_samples, 3], [num_samples]
     return rays_o[..., None, :] + t[..., None] * rays_d[..., None, :], t
@@ -48,9 +51,9 @@ def sample_hierarchical(rays: Tensor, t: Tensor, deltas: Tensor, weights: Tensor
     """
     rays_o, rays_d = rays[..., 0], rays[..., 1]
     # [image_height, image_width, num_samples_stratified]
-    t = t[None, None, :-1].expand_as(weights)
+    t = t[..., :-1].expand_as(weights)
     # [image_height, image_width, num_samples_stratified - 1]
-    deltas = deltas[None, None, ...].expand_as(weights)
+    deltas = deltas.expand_as(weights)
 
     # Generate pdf by normalizing weights
     # [image_height, image_width, num_samples_stratified - 1]
