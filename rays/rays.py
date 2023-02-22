@@ -47,7 +47,9 @@ def get_rays(image_width: int, image_height: int, camera_angle_x: float, pose_ma
     translation = pose_matrix[:3, 3]
 
     # Rotate direction vectors
-    directions = torch.matmul(directions, rotation_matrix)
+    # directions = torch.matmul(directions, rotation_matrix)
+    directions = torch.sum(
+        directions[..., None, :] * rotation_matrix[None, None, ...], dim=-1)
 
     # Translation is broadcasted to [image_height, image_width, 3]
     origins = translation[None, None, ...].expand_as(directions)
