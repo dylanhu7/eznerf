@@ -70,7 +70,9 @@ def run_func(model: NeRF,
                 t = t[None, None, :].expand(
                     t_hierarchical.shape[:-1] + (t.shape[-1],))
                 t = torch.cat([t, t_hierarchical], dim=-1)
-                t, _ = torch.sort(t)
+                t, indices = torch.sort(t)
+                points = torch.gather(points, dim=-2, index=indices[..., None].expand(
+                    indices.shape + (points.shape[-1],)))
                 image, _, _ = run_nerf(model, points, rays_d, t)
 
                 image = image.permute(2, 0, 1)
