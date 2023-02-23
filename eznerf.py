@@ -6,6 +6,7 @@ from typing import Optional
 import torch
 import torch.backends.mps
 from tqdm import tqdm
+from natsort import natsorted
 
 from animate.animate import animate
 from dataloader.data import get_train_loader, get_test_loader
@@ -26,9 +27,10 @@ def main():
     if args.checkpoint is not None:
         checkpoint = torch.load(args.checkpoint)
     elif args.resume:
-        checkpoints = glob.glob("checkpoints/checkpoint_*.pt")
+        # load latest checkpoint with natsort
+        checkpoints = glob.glob(os.path.join(args.checkpoints_dir, '*.pt'))
+        checkpoints = natsorted(checkpoints)
         if len(checkpoints) > 0:
-            checkpoints.sort()
             checkpoint = torch.load(checkpoints[-1])
     if checkpoint is not None:
         model.load_state_dict(checkpoint['model_state_dict'])
