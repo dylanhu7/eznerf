@@ -52,7 +52,7 @@ def run_func(model: NeRF,
             for batch_idx, frame in tqdm(enumerate(loader), total=len(loader)):
                 frame: Frame
 
-                target_image = frame['image'].to(device)
+                target_image = frame['image']
 
                 # # (4, image_height, image_width)
                 # target_image = frame['image'].to(device)
@@ -64,7 +64,7 @@ def run_func(model: NeRF,
                 # target_image = target_image / 255.0
 
                 # [image_height, image_width, 3, 2]
-                rays = frame['rays'].to(device)
+                rays = frame['rays']
                 # [image_height, image_width, 3]
                 ray_directions = rays[..., 1]
 
