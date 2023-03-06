@@ -53,7 +53,7 @@ def main():
         else: validate = None
         for epoch in tqdm(range(epoch, epoch + args.epochs)):
             train(epoch)
-            if epoch % 1 == 0:
+            if epoch % 50 == 0:
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
