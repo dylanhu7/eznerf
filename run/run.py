@@ -130,9 +130,9 @@ def run_nerf(model: NeRF,
              points: Tensor,
              rays_d: Tensor,
              t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    # (num_pixels, num_samples, 3 + 3 * 2 * x_num_bands)
+    # (H, W, num_samples, 3 + 3 * 2 * x_num_bands)
     x_encoded = model.x_encoder(points)
-    # (num_pixels, 3 + 3 * 2 * d_num_bands)
+    # (H, W, 3 + 3 * 2 * d_num_bands)
     d_encoded = model.d_encoder(rays_d)
     # print("x_encoded", x_encoded.shape)
     # print("d_encoded", d_encoded.shape)
@@ -143,20 +143,24 @@ def run_nerf(model: NeRF,
     input = torch.cat([x_encoded, d_encoded], dim=-1)
 
     # (H * W * num_samples, 3 + 3 + (3 * 2 * (x_num_bands + d_num_bands)))
-    input = input.reshape(-1, input.shape[-1])
-
-    output = model(input)
+    # input = input.reshape(-1, input.shape[-1])
 
     # (H * W * num_samples, 3), (H * W * num_samples)
-    rgb, sigma = output[..., :3], output[..., 3]
-    # (H, W, num_samples, 3)
-    rgb = rgb.reshape(
-        (list(points.shape)[:-1] + [3]))
-    # (H, W, num_samples)
-    sigma = sigma.reshape(
-        (list(points.shape)[:-1]))
+    rgb, sigma = model(input)
 
-    # (H, W, num_samples_stratified, 3), (H, W, num_samples_stratified)
+    # (H, W, num_samples, 3)
+    # rgb = rgb.reshape(
+    #     (list(points.shape)[:-1] + [3]))
+    # # (H, W, num_samples)
+    # sigma = sigma.reshape(
+    #     (list(points.shape)[:-1]))
+
+    # [H, W, num_samples, 1] -> [H, W, num_samples]
+    sigma = sigma.squeeze(-1)
+    # [num_samples] -> [H, W, num_samples]
+    t = t.expand_as(sigma)
+
+    # [H, W, 3], [H, W, num_samples], [H, W, num_samples]
     return volume_render(rgb, sigma, t)
 
 
