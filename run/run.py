@@ -64,7 +64,7 @@ def run_func(model: NeRF,
                 # target_image = target_image / 255.0
 
                 # [image_height, image_width, 3, 2]
-                rays = frame['rays']
+                rays = frame['rays'].to(device)
                 # [image_height, image_width, 3]
                 ray_directions = rays[..., 1]
 

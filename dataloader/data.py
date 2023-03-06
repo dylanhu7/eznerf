@@ -1,6 +1,7 @@
 import os
 import torch.utils.data
 import json
+import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from typing import TypedDict, Optional
@@ -26,7 +27,7 @@ class Frame(TypedDict):
 class NeRFDataset(Dataset[Frame]):
     """A PyTorch Dataset for NeRF."""
 
-    def __init__(self, path: str, train: bool):
+    def __init__(self, path: str, train: bool, device: torch.device):
         """Initializes the dataset.
 
         Args:
@@ -49,12 +50,12 @@ class NeRFDataset(Dataset[Frame]):
             path_frames: list[PathFrame] = data['frames']
             for frame in path_frames:
                 base_path = os.path.join(os.path.dirname(self.path), os.path.relpath(frame['file_path']))
-                image = io.read_image(base_path + '.png', io.ImageReadMode.RGB) # [3, H, W]
+                image = io.read_image(base_path + '.png', io.ImageReadMode.RGB).to(device) # [3, H, W]
                 image = image.permute(1, 2, 0) # [H, W, 3]
                 image = image.float() / 255.0
-                transform_matrix = Tensor(frame['transform_matrix'])
-                depth = io.read_image(base_path + '_depth_0001.png') if not train else None
-                normal = io.read_image(base_path + '_normal_0001.png') if not train else None
+                transform_matrix = Tensor(frame['transform_matrix']).to(device)
+                depth = io.read_image(base_path + '_depth_0001.png').to(device) if not train else None
+                normal = io.read_image(base_path + '_normal_0001.png').to(device) if not train else None
                 rays = get_rays(image.shape[0], image.shape[1], self.camera_angle_x, transform_matrix)
                 self.frames.append({
                     'image': image,
@@ -86,34 +87,4 @@ class NeRFDataset(Dataset[Frame]):
                 normal: Tensor of shape (3, 256, 256)
         """
         return self.frames[idx]
-
-
-def get_train_loader(path: str,
-                     shuffle: bool,
-                     batch_size: Optional[int] = None,
-                     num_workers=0) -> DataLoader[Frame]:
-    """Returns a PyTorch DataLoader for the NeRF training dataset.
-
-    Args:
-        path (str): The path to the JSON file containing fields:
-            camera_angle_x: float
-            frames: list of dicts with the following fields
-                file_path: str
-                transform_matrix: list of lists of floats
-        batch_size (int, optional): The batch size.
-            If None, automatic batching will be disabled.
-        train (bool): Whether this is a training or testing loader.
-            If training, the dataset will be shuffled for each epoch. If testing, the depth and normal maps will be loaded.
-            Defaults to True.
-        shuffle (bool): Whether to shuffle the dataset for each epoch.
-            Defaults to True.
-        num_workers (int): The number of workers to use for loading the data.
-            Defaults to 0.
-
-    Returns:
-        DataLoader: The data loader.
-    """
-    dataset = NeRFDataset(path, True)
-    data_loader = DataLoader[Frame](
-        dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
-    return data_loader
+    

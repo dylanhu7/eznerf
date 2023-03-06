@@ -41,12 +41,12 @@ def main():
         epoch += 1
         print(f"Starting at epoch {epoch}")
         print(f"Training for {args.epochs} epochs")
-        train_dataset = NeRFDataset(args.train_json, train=True)
+        train_dataset = NeRFDataset(args.train_json, True, device)
         train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True)
         train = run_func(model, device, train_loader, args.num_rays,
                          optimizer, args.output_dir, train=True)
         if args.val_json:
-            val_dataset = NeRFDataset(args.val_json, train=True)
+            val_dataset = NeRFDataset(args.val_json, True, device)
             val_loader = DataLoader(val_dataset, batch_size=None, shuffle=False)
             validate = run_func(model, device, val_loader, None,
                         optimizer, args.output_dir, train=False)
@@ -63,7 +63,7 @@ def main():
         print("Training complete")
 
     if args.test_json:
-        test_dataset = NeRFDataset(args.test_json, train=False)
+        test_dataset = NeRFDataset(args.test_json, False, device)
         test_loader = DataLoader(test_dataset, batch_size=None, shuffle=False)
         test = run_func(model, device, test_loader, None,
                         optimizer, args.output_dir, train=False)
