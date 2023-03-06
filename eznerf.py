@@ -5,11 +5,12 @@ from typing import Optional
 
 import torch
 import torch.backends.mps
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from natsort import natsorted
 
 from animate.animate import animate
-from dataloader.data import get_train_loader, get_test_loader
+from dataloader.data import NeRFDataset
 from model.model import NeRF
 from run.run import run_func
 
@@ -27,9 +28,7 @@ def main():
     if args.checkpoint is not None:
         checkpoint = torch.load(args.checkpoint)
     elif args.resume:
-        # load latest checkpoint with natsort
-        checkpoints = glob.glob(os.path.join(args.checkpoints_dir, '*.pt'))
-        checkpoints = natsorted(checkpoints)
+        checkpoints = natsorted(glob.glob(os.path.join(args.checkpoints_dir, '*.pt')))
         if len(checkpoints) > 0:
             checkpoint = torch.load(checkpoints[-1])
     if checkpoint is not None:
@@ -42,13 +41,16 @@ def main():
         epoch += 1
         print(f"Starting at epoch {epoch}")
         print(f"Training for {args.epochs} epochs")
-        train_loader = get_train_loader(args.train_json)
+        train_dataset = NeRFDataset(args.train_json, train=True)
+        train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True)
         train = run_func(model, device, train_loader, args.num_rays,
                          optimizer, args.output_dir, train=True)
         if args.val_json:
-            val_loader = get_train_loader(args.val_json)
+            val_dataset = NeRFDataset(args.val_json, train=True)
+            val_loader = DataLoader(val_dataset, batch_size=None, shuffle=False)
             validate = run_func(model, device, val_loader, None,
                         optimizer, args.output_dir, train=False)
+        else: validate = None
         for epoch in tqdm(range(epoch, epoch + args.epochs)):
             train(epoch)
             if epoch % 1 == 0:
@@ -57,13 +59,13 @@ def main():
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                 }, f'checkpoints/checkpoint_{epoch}.pt')
-                if args.val_json:
-                    validate(epoch)
+                validate(epoch) if validate else None
         print("Training complete")
 
     if args.test_json:
-        test_loader = get_test_loader(args.test_json)
-        test = run_func(model, device, test_loader,
+        test_dataset = NeRFDataset(args.test_json, train=False)
+        test_loader = DataLoader(test_dataset, batch_size=None, shuffle=False)
+        test = run_func(model, device, test_loader, None,
                         optimizer, args.output_dir, train=False)
         print("Testing")
         test(epoch)
@@ -81,13 +83,19 @@ def parse_args():
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--epochs', type=int, default=1000)
-    parser.add_argument('--num_rays', type=Optional[int], default=1024)
+    parser.add_argument('--num_rays', type=int, default=None)
     parser.add_argument('--animate', action='store_true')
     parser.add_argument('--output_dir', type=str, default='output')
     parser.add_argument('--checkpoints_dir', type=str, default='checkpoints')
     parser.add_argument('--device', type=str, default=None)
 
     args = parser.parse_args()
+
+    if args.train_json is None and args.test_json is None and not args.animate:
+        raise ValueError("Must provide at least one of: train_json, test_json, animate")
+    
+    if args.animate and args.checkpoint is None and not args.resume:
+        raise ValueError("Must provide a checkpoint or --resume flag to animate")
 
     if args.resume and args.checkpoint is not None:
         raise ValueError("Cannot resume and load checkpoint at the same time")

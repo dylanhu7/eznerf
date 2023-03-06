@@ -1,11 +1,11 @@
-import torch
 import os
 import torch.utils.data
 import json
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from typing import TypedDict, Optional, TypeVar, Generic
+from typing import TypedDict, Optional
 from torchvision import io
+from rays.rays import get_rays
 
 
 class PathFrame(TypedDict):
@@ -15,23 +15,15 @@ class PathFrame(TypedDict):
 
 
 class Frame(TypedDict):
-    """A dictionary corresponding to a frame in the NeRF dataset for training."""
+    """A dictionary corresponding to a frame in the NeRF dataset."""
     image: Tensor
     transform_matrix: Tensor
+    depth: Optional[Tensor]
+    normal: Optional[Tensor]
+    rays: Tensor
 
 
-class TestFrame(TypedDict):
-    """A dictionary corresponding to a frame in the NeRF dataset for testing."""
-    image: Tensor
-    transform_matrix: Tensor
-    depth: Tensor
-    normal: Tensor
-
-
-T = TypeVar('T', bound=Frame | TestFrame)
-
-
-class NeRFDataset(Dataset[T]):
+class NeRFDataset(Dataset[Frame]):
     """A PyTorch Dataset for NeRF."""
 
     def __init__(self, path: str, train: bool):
@@ -50,21 +42,37 @@ class NeRFDataset(Dataset[T]):
         super().__init__()
         self.path = path
         self.train = train
-        # Read the JSON file and get the camera angle and frames.
+        self.frames: list[Frame] = []
         with open(path, 'r') as f:
             data = json.load(f)
             self.camera_angle_x: float = data['camera_angle_x']
-            self.frames: list[PathFrame] = data['frames']
-            self.image_size: tuple[int, int] = io.read_image(os.path.join(os.path.dirname(
-                self.path), os.path.relpath(self.frames[0]['file_path'] + '.png'))).shape[1:]
-            self.image_height: int = self.image_size[0]
-            self.image_width: int = self.image_size[1]
+            path_frames: list[PathFrame] = data['frames']
+            for frame in path_frames:
+                base_path = os.path.join(os.path.dirname(self.path), os.path.relpath(frame['file_path']))
+                image = io.read_image(base_path + '.png', io.ImageReadMode.RGB) # [3, H, W]
+                image = image.permute(1, 2, 0) # [H, W, 3]
+                image = image.float() / 255.0
+                transform_matrix = Tensor(frame['transform_matrix'])
+                depth = io.read_image(base_path + '_depth_0001.png') if not train else None
+                normal = io.read_image(base_path + '_normal_0001.png') if not train else None
+                rays = get_rays(image.shape[0], image.shape[1], self.camera_angle_x, transform_matrix)
+                self.frames.append({
+                    'image': image,
+                    'transform_matrix': transform_matrix,
+                    'depth': depth,
+                    'normal': normal,
+                    'rays': rays
+                })
+        self.image_height = self.frames[0]['image'].shape[0]
+        self.image_width = self.frames[0]['image'].shape[1]
+        print(f'Loaded {len(self.frames)} frames of size {self.image_width}x{self.image_height} from {self.path}')
+            
 
     def __len__(self):
         """Returns the number of samples in the dataset."""
         return len(self.frames)
 
-    def __getitem__(self, idx: int) -> T:
+    def __getitem__(self, idx: int) -> Frame:
         """Returns the sample in the dataset at the given index.
 
         Args:
@@ -77,35 +85,12 @@ class NeRFDataset(Dataset[T]):
                 depth: Tensor of shape (256, 256)
                 normal: Tensor of shape (3, 256, 256)
         """
-        # Get the frame.
-        frame = self.frames[idx]
-        # Read the image.
-        image = io.read_image(os.path.join(os.path.dirname(
-            self.path), os.path.relpath(frame['file_path'] + '.png')))
-        # Get the transform matrix.
-        transform_matrix = Tensor(frame['transform_matrix'])
-        # Get the rotation.
-        # If this is a training loader, return the image and transform matrix.
-        if self.train:
-            return {
-                'image': image,
-                'transform_matrix': transform_matrix,
-            }  # type: ignore
-        # If this is a testing loader, return the image, depth, normal, transform matrix, and rotation.
-        else:
-            return {
-                'image': image,
-                'transform_matrix': transform_matrix,
-                'depth': io.read_image(os.path.join(os.path.dirname(
-                    self.path), os.path.relpath(frame['file_path'] + '_depth_0001.png'))),
-                'normal': io.read_image(os.path.join(os.path.dirname(
-                    self.path), os.path.relpath(frame['file_path'] + '_normal_0001.png'))),
-            }  # type: ignore
+        return self.frames[idx]
 
 
 def get_train_loader(path: str,
+                     shuffle: bool,
                      batch_size: Optional[int] = None,
-                     shuffle=True,
                      num_workers=0) -> DataLoader[Frame]:
     """Returns a PyTorch DataLoader for the NeRF training dataset.
 
@@ -130,36 +115,5 @@ def get_train_loader(path: str,
     """
     dataset = NeRFDataset(path, True)
     data_loader = DataLoader[Frame](
-        dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
-    return data_loader
-
-
-def get_test_loader(path: str,
-                    batch_size: Optional[int] = None,
-                    shuffle=False,
-                    num_workers=0) -> DataLoader[TestFrame]:
-    """Returns a PyTorch DataLoader for the NeRF testing dataset.
-
-    Args:
-        path (str): The path to the JSON file containing fields:
-            camera_angle_x: float
-            frames: list of dicts with the following fields
-                file_path: str
-                transform_matrix: list of lists of floats
-        batch_size (int, optional): The batch size.
-            If None, automatic batching will be disabled.
-        train (bool): Whether this is a training or testing loader.
-            If training, the dataset will be shuffled for each epoch. If testing, the depth and normal maps will be loaded.
-            Defaults to True.
-        shuffle (bool): Whether to shuffle the dataset for each epoch.
-            Defaults to True.
-        num_workers (int): The number of workers to use for loading the data.
-            Defaults to 0.
-
-    Returns:
-        DataLoader: The data loader.
-    """
-    dataset = NeRFDataset(path, False)
-    data_loader = DataLoader[TestFrame](
         dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
     return data_loader

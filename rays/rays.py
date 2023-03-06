@@ -1,12 +1,12 @@
 import torch
 
 
-def get_rays(image_width: int, image_height: int, camera_angle_x: float, pose_matrix: torch.Tensor) -> torch.Tensor:
+def get_rays(image_height: int, image_width: int, camera_angle_x: float, pose_matrix: torch.Tensor) -> torch.Tensor:
     """Returns a tensor of rays for the given image size, camera angle, and pose matrix.
 
     Args:
-        image_width (int): The width of the image in pixels.
         image_height (int): The height of the image in pixels.
+        image_width (int): The width of the image in pixels.
         camera_angle_x (float): The horizontal field of view of the camera in radians.
         pose_matrix (torch.Tensor): The pose matrix of the camera.
 
