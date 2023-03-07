@@ -67,6 +67,7 @@ def run_func(model: NeRF,
                 rays = frame['rays']
                 # [image_height, image_width, 3]
                 ray_directions = rays[..., 1]
+                ray_directions_normalized = F.normalize(ray_directions, dim=-1)
 
                 # Randomly select N rays
                 # print("rays", rays.shape)
@@ -81,7 +82,7 @@ def run_func(model: NeRF,
                 # (H, W, num_samples, 3), (num_samples)
                 points, t = sample_stratified(rays, 2., 6., 64)
                 # print("points", points.shape)
-                image, weights, deltas = run_nerf(model, points, ray_directions, t)
+                image, weights, deltas = run_nerf(model, points, ray_directions_normalized, t)
                 
 
                 # (H, W, num_samples, 3), (H, W, num_samples)
