@@ -1,21 +1,106 @@
 import os
-from typing import Callable, TypedDict, Optional
-from jinja2 import Template
-from tqdm import tqdm
+from typing import Callable, TypedDict
 
 import torch
 import torch.backends.mps
 import torch.nn.functional as F
+from jinja2 import Template
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchvision import io
+from tqdm import tqdm
 
-from dataloader.data import Frame, NeRFDataset
 from model.model import NeRF
-from rays.rays import get_rays
 from render.render import volume_render
-from sample.sample import sample_hierarchical, sample_stratified
+from sample.sample import (
+    sample_hierarchical,
+    sample_stratified,
+)
+
+
+def render_rays(
+    coarse_model: NeRF,
+    fine_model: NeRF,
+    ray_origins: Tensor,
+    ray_directions: Tensor,
+    ray_directions_normalized: Tensor,
+    train: bool,
+) -> tuple[Tensor, Tensor]:
+    # Sample points
+    points, z = sample_stratified(ray_origins, ray_directions, 2, 6, 64)
+
+    # Encode and forward pass
+    rgb, sigma = query_nerf(coarse_model, points, ray_directions_normalized)
+
+    # Volume render to obtain weights
+    rgb_coarse, weights = volume_render(rgb, sigma, z)
+
+    # Sample according to weights
+    points_hierarchical, z_hierarchical = sample_hierarchical(
+        ray_origins, ray_directions, z, weights, 128, train
+    )
+    z_hierarchical = z_hierarchical.detach()
+
+    # Sort z values and gather points accordingly
+    z, indices = torch.sort(torch.cat([z, z_hierarchical], -1), -1)
+    points = torch.cat([points, points_hierarchical], -2)
+    indices = indices[..., None].expand_as(points)
+    points = torch.gather(points, -2, indices)
+
+    # Encode and forward pass again
+    rgb, sigma = query_nerf(fine_model, points, ray_directions_normalized)
+
+    # Volume render to obtain final pixel colors
+    rgb_fine, _ = volume_render(rgb, sigma, z)
+
+    return rgb_coarse, rgb_fine
+
+
+def query_nerf(
+    model: NeRF, points: Tensor, ray_directions_normalized: Tensor
+) -> tuple[Tensor, Tensor]:
+    # [batch_size, 3] -> [batch_size, num_samples_stratified, 3]
+    ray_directions_normalized = ray_directions_normalized[..., None, :].expand_as(
+        points
+    )
+    return model(points, ray_directions_normalized)
+
+
+def train_func(
+    coarse_model: NeRF, fine_model: NeRF, loader: DataLoader, optimizer: Optimizer
+) -> Callable[[int], None]:
+    def train_epoch(epoch: int):
+        for batch in (pbar := tqdm(loader)):
+            batch: tuple[Tensor, ...]
+            (
+                ray_origins,
+                ray_directions,
+                ray_directions_normalized,
+                target_image,
+            ) = batch
+
+            rgb_coarse, rgb_fine = render_rays(
+                coarse_model,
+                fine_model,
+                ray_origins,
+                ray_directions,
+                ray_directions_normalized,
+                train=True,
+            )
+            coarse_loss = F.mse_loss(rgb_coarse, target_image)
+            fine_loss = F.mse_loss(rgb_fine, target_image)
+            loss = coarse_loss + fine_loss
+            psnr = -10 * torch.log10(fine_loss)
+            pbar.set_description(
+                f"[Training | Epoch {epoch} | Loss: {loss.item():.4f} | PSNR: {psnr.item():.4f}]"
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    return train_epoch
 
 
 class ResultDict(TypedDict):
@@ -26,161 +111,93 @@ class ResultDict(TypedDict):
     target_image: str
 
 
-def run_func(model: NeRF,
-             device: torch.device,
-             loader: DataLoader[Frame],
-             num_rays: Optional[int],
-             optimizer: Optimizer,
-             output_dir: str,
-             train: bool) -> Callable[[int], None]:
-    losses: list[float] = []
-    psnrs: list[float] = []
-
-    def run_epoch(epoch: int):
-        loss_sum = 0.
-        psnr_sum = 0.
-        # make epoch dir if it doesn't exist
-        epoch_dir = os.path.join(output_dir, f'epoch_{epoch}')
-        images_dir = os.path.join(epoch_dir, 'images')
-        if not train and not os.path.exists(images_dir):
-            os.makedirs(images_dir)
+def test_func(
+    coarse_model: NeRF, fine_model: NeRF, loader: DataLoader, output_dir: str
+) -> Callable[[int], None]:
+    def test_epoch(epoch: int):
+        losses: list[float] = []
+        psnrs: list[float] = []
+        loss_sum = 0.0
+        psnr_sum = 0.0
+        epoch_dir = os.path.join(output_dir, f"epoch_{epoch}")
+        images_dir = os.path.join(epoch_dir, "images")
+        os.makedirs(images_dir, exist_ok=True)
         results: list[ResultDict] = []
-        dataset: NeRFDataset[Frame] = loader.dataset  # type: ignore
 
-        model.train(train)
-        with torch.set_grad_enabled(train):
-            for batch_idx, frame in tqdm(enumerate(loader), total=len(loader)):
-                frame: Frame
+        with torch.no_grad():
+            for frame_idx, frame in enumerate(pbar := tqdm(loader)):
+                if frame_idx % 10 == 0:
+                    frame: tuple[Tensor, ...]
+                    (
+                        ray_origins,
+                        ray_directions,
+                        ray_directions_normalized,
+                        target_image,
+                    ) = frame
+                    chunk_size = ray_origins.shape[0] // 20
+                    chunk_count = ray_origins.shape[0] // chunk_size
+                    chunk_rays_o = torch.chunk(ray_origins, chunk_count)
+                    chunk_rays_d = torch.chunk(ray_directions, chunk_count)
+                    chunk_rays_d_norm = torch.chunk(
+                        ray_directions_normalized, chunk_count
+                    )
+                    image = []
+                    for i in range(chunk_count):
+                        _, rgb_fine = render_rays(
+                            coarse_model,
+                            fine_model,
+                            chunk_rays_o[i],
+                            chunk_rays_d[i],
+                            chunk_rays_d_norm[i],
+                            train=False,
+                        )
+                        image.append(rgb_fine)
 
-                target_image = frame['image']
-
-                # # (4, image_height, image_width)
-                # target_image = frame['image'].to(device)
-                # # Reshape to (num_pixels, 4)
-                # target_image = target_image.reshape(-1, 4)
-                # # Remove alpha channel: (num_pixels, 3)
-                # target_image = target_image[..., :3]
-                # # Divide by 255.0 to normalize to [0, 1]
-                # target_image = target_image / 255.0
-
-                # [image_height, image_width, 3, 2]
-                rays = frame['rays']
-                # [image_height, image_width, 3]
-                ray_directions = rays[..., 1]
-                ray_directions_normalized = F.normalize(ray_directions, dim=-1)
-
-                # Randomly select N rays
-                # print("rays", rays.shape)
-                # if num_rays is not None:
-                #     rays = rays.reshape(-1, 3, 2)
-                #     ray_indices = torch.randperm(rays.shape[0])[:num_rays]
-                #     rays = rays[ray_indices]
-                #     ray_directions = rays[..., 1]
-                # print("rays_o", rays_o.shape)
-                # print("rays_d", rays_d.shape)
-
-                # (H, W, num_samples, 3), (num_samples)
-                points, t = sample_stratified(rays, 2., 6., 64)
-                # print("points", points.shape)
-                image, weights, deltas = run_nerf(model, points, ray_directions_normalized, t)
-                
-
-                # (H, W, num_samples, 3), (H, W, num_samples)
-                # points_hierarchical, t_hierarchical = sample_hierarchical(
-                #     rays, t, deltas, weights, 128)
-
-                # points = torch.cat([points, points_hierarchical], dim=-2)
-
-                # t = t.expand(
-                #     t_hierarchical.shape[:-1] + (t.shape[-1],))
-                # t = torch.cat([t, t_hierarchical], dim=-1)
-                # t, indices = torch.sort(t)
-                # points = torch.gather(points, -2, indices[..., None].expand(
-                #     indices.shape + (points.shape[-1],)))
-                # image, _, _ = run_nerf(model, points, ray_directions, t)
-
-                # print("image", image.shape)
-
-                # target_image = target_image[ray_indices]
-                # print("image", image.shape)
-                # print("target_image", target_image.shape)
-                # print("target_image_type", target_image.dtype)
-                loss = F.mse_loss(image, target_image)
-
-                if train:
-                    loss.backward()
-                    optimizer.step()
-                    optimizer.zero_grad()
-                else:
+                    image = torch.cat(image, dim=0)
+                    loss = F.mse_loss(image, target_image)
                     losses.append(loss_item := loss.item())
-                    psnrs.append(
-                        psnr := 10. * torch.log10(Tensor(1. / loss)).item())
+                    psnrs.append(psnr := (-10 * torch.log10(loss)).item())
                     loss_sum += loss_item
                     psnr_sum += psnr
+                    if frame_idx % 10 == 0:
+                        results.append(
+                            write_output(
+                                image.reshape(400, 400, 3),
+                                target_image.reshape(400, 400, 3),
+                                frame_idx,
+                                epoch_dir,
+                                loss_item,
+                                psnr,
+                            )
+                        )
+                    pbar.set_description(
+                        f"[Testing | Epoch {epoch} | Frame {frame_idx}/{len(loader)} | Loss: {loss_item:.4f} | PSNR: {psnr:.4f}]"
+                    )
+        generate_html(epoch, epoch_dir, results)
 
-                    if batch_idx % 10 == 0:
-                        results.append(write_output(image, target_image, batch_idx, epoch_dir, loss_item, psnr))
-
-        if not train:
-            generate_html(epoch, epoch_dir, results)
-
-    return run_epoch
-
-
-def run_nerf(model: NeRF,
-             points: Tensor,
-             rays_d: Tensor,
-             t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    # (H, W, num_samples, 3 + 3 * 2 * x_num_bands)
-    x_encoded = model.x_encoder(points)
-    # (H, W, 3 + 3 * 2 * d_num_bands)
-    d_encoded = model.d_encoder(rays_d)
-    # print("x_encoded", x_encoded.shape)
-    # print("d_encoded", d_encoded.shape)
-    # (H, W, num_samples, 3 + 3 * 2 * d_num_bands)
-    d_encoded = d_encoded[..., None, :].expand(
-        d_encoded.shape[:-1] + (points.shape[-2],) + d_encoded.shape[-1:])
-
-    input = torch.cat([x_encoded, d_encoded], dim=-1)
-
-    # (H * W * num_samples, 3 + 3 + (3 * 2 * (x_num_bands + d_num_bands)))
-    # input = input.reshape(-1, input.shape[-1])
-
-    # (H * W * num_samples, 3), (H * W * num_samples)
-    rgb, sigma = model(input)
-
-    # (H, W, num_samples, 3)
-    # rgb = rgb.reshape(
-    #     (list(points.shape)[:-1] + [3]))
-    # # (H, W, num_samples)
-    # sigma = sigma.reshape(
-    #     (list(points.shape)[:-1]))
-
-    # [H, W, num_samples, 1] -> [H, W, num_samples]
-    sigma = sigma.squeeze(-1)
-    # [num_samples] -> [H, W, num_samples]
-    t = t.expand_as(sigma)
-
-    # [H, W, 3], [H, W, num_samples], [H, W, num_samples]
-    return volume_render(rgb, sigma, t)
+    return test_epoch
 
 
-def write_output(image: Tensor, target_image: Tensor, batch_idx: int, epoch_dir: str, loss: float, psnr: float) -> ResultDict:
-    image_file = os.path.join("images", f'{batch_idx}.png')
-    target_image_file = os.path.join(
-        "images", f'{batch_idx}_target.png')
+def write_output(
+    image: Tensor,
+    target_image: Tensor,
+    batch_idx: int,
+    epoch_dir: str,
+    loss: float,
+    psnr: float,
+) -> ResultDict:
+    image_file = os.path.join("images", f"{batch_idx}.png")
+    target_image_file = os.path.join("images", f"{batch_idx}_target.png")
     image_path = os.path.join(epoch_dir, image_file)
     target_image_path = os.path.join(epoch_dir, target_image_file)
-    with open(image_path, 'w+') as file:
-        image = image.detach()
+    with open(image_path, "w+") as file:
         image = image.permute(2, 0, 1)
-        image = image * 255.0 + 0.5
+        image = image * 255.0
         image = image.to(torch.uint8).cpu()
         io.write_png(image, file.name)
-    with open(target_image_path, 'w+') as file:
-        target_image = target_image.detach()
+    with open(target_image_path, "w+") as file:
         target_image = target_image.permute(2, 0, 1)
-        target_image = target_image * 255.0 + 0.5
+        target_image = target_image * 255.0
         target_image = target_image.to(torch.uint8).cpu()
         io.write_png(target_image, file.name)
     return ResultDict(
@@ -188,11 +205,12 @@ def write_output(image: Tensor, target_image: Tensor, batch_idx: int, epoch_dir:
         loss=loss,
         psnr=psnr,
         image=image_file,
-        target_image=target_image_file)
+        target_image=target_image_file,
+    )
 
 
 def generate_html(epoch: int, epoch_dir: str, results: list[ResultDict]):
-    with open(os.path.join(os.path.dirname(__file__), 'template.html.jinja')) as f:
+    with open(os.path.join(os.path.dirname(__file__), "template.html.jinja")) as f:
         template = Template(f.read())
-    with open(f'{epoch_dir}/index.html', 'w+') as f:
+    with open(f"{epoch_dir}/index.html", "w+") as f:
         f.write(template.render(epoch=epoch, results=results))

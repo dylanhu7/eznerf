@@ -1,14 +1,14 @@
 name: eznerf
 channels:
-  - pytorch-nightly
+  - pytorch
   - nvidia
   - conda-forge
 dependencies:
-  - python=3.10
+  - python
   - pytorch
   - torchvision
   - opencv
   - tqdm
   - jinja2
   - natsort
-  - pytorch-cuda # remove this if you don't have a GPU
+  - pytorch-cuda # remove this if you don't have an NVIDIA GPU
