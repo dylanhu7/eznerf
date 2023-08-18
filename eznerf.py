@@ -4,8 +4,9 @@ import torch
 import torch.backends.mps
 from torch.utils.data import DataLoader
 
+import wandb
 from animate.animate import animate
-from config.config import EZNeRFConfig, parse_args
+from config.config import EZNeRFConfig, get_config
 from dataloader.data import NeRFDataset
 from model.model import NeRF
 from run.run import test_func, train_func
@@ -87,9 +88,9 @@ def resume(
     return epoch
 
 
-def setup_device(arg_device: str | None) -> torch.device:
-    if arg_device is not None:
-        device = torch.device(arg_device)
+def setup_device(config: EZNeRFConfig) -> torch.device:
+    if config.device is not None:
+        device = torch.device(config.device)
     else:
         device = (
             torch.device("cuda")
@@ -99,13 +100,15 @@ def setup_device(arg_device: str | None) -> torch.device:
             else torch.device("cpu")
         )
     print(f"Using device: {device}")
+    config.device = device.__str__()
     return device
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    device = setup_device(args.device)
-    os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(args.checkpoints_dir, exist_ok=True)
+    config = get_config()
+    device = setup_device(config)
+    wandb.init(project="eznerf", config=config, anonymous="allow")  # type: ignore
+    os.makedirs(config.output_dir, exist_ok=True)
+    os.makedirs(config.checkpoints_dir, exist_ok=True)
     with device:
-        main(args)
+        main(config)

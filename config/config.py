@@ -1,4 +1,5 @@
 from typing import Optional
+
 import configargparse
 
 
@@ -9,7 +10,6 @@ class EZNeRFConfig(configargparse.Namespace):
     H: int
     W: int
     checkpoint: Optional[str]
-    resume: bool
     checkpoints_dir: str
     output_dir: str
     epochs: int
@@ -18,8 +18,10 @@ class EZNeRFConfig(configargparse.Namespace):
     device: str
 
 
-def parse_args() -> EZNeRFConfig:
-    parser = configargparse.ArgumentParser()
+def get_config() -> EZNeRFConfig:
+    parser = configargparse.ArgumentParser(
+        formatter_class=configargparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument("-c", "--config", is_config_file=True)
     parser.add_argument("--train_json", type=str, default=None)
     parser.add_argument("--val_json", type=str, default=None)
@@ -34,6 +36,6 @@ def parse_args() -> EZNeRFConfig:
     parser.add_argument("--checkpoints_dir", type=str, default="checkpoints")
     parser.add_argument("--device", type=str, default=None)
 
-    args: EZNeRFConfig = parser.parse_args(namespace=EZNeRFConfig())
+    config: EZNeRFConfig = parser.parse_args(namespace=EZNeRFConfig())
 
-    return args
+    return config

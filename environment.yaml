@@ -11,4 +11,5 @@ dependencies:
   - tqdm
   - jinja2
   - configargparse
+  - wandb
   - pytorch-cuda # remove this if you don't have an NVIDIA GPU
