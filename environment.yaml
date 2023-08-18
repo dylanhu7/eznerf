@@ -10,5 +10,5 @@ dependencies:
   - opencv
   - tqdm
   - jinja2
-  - natsort
+  - configargparse
   - pytorch-cuda # remove this if you don't have an NVIDIA GPU

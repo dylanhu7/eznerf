@@ -1,0 +1,8 @@
+train_json: data/nerf_synthetic/lego/transforms_train.json
+val_json: data/nerf_synthetic/lego/transforms_val.json
+test_json: data/nerf_synthetic/lego/transforms_test.json
+H: 400
+W: 400
+epochs: 20
+batch_size: 1024
+animate: True
