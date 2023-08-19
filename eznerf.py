@@ -3,13 +3,16 @@ import os
 import torch
 import torch.backends.mps
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 import wandb
 from animate.animate import animate
 from config.config import EZNeRFConfig, get_config
 from dataloader.data import NeRFDataset
 from model.model import NeRF
-from run.run import test_func, train_func
+from run.run import train_batch
+from util.infinite_iterable import InfiniteIterable
+from util.log import log_batch
 
 
 def main(config: EZNeRFConfig):
@@ -17,13 +20,16 @@ def main(config: EZNeRFConfig):
     fine_model = NeRF(x_num_bands=10, d_num_bands=4, hidden_dim=256)
     parameters = list(coarse_model.parameters()) + list(fine_model.parameters())
     optimizer = torch.optim.Adam(parameters, lr=5e-4)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
-    epoch = resume(coarse_model, fine_model, optimizer, config.checkpoint)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        optimizer, gamma=torch.exp(torch.log(torch.tensor(0.1)) / 250000).item()
+    )
+    initial_iter = resume(coarse_model, fine_model, optimizer, config.checkpoint)
 
-    # Setup run functions
-    train, validate, test = None, None, None
     if config.train_json:
-        print(f"Starting at epoch {epoch}")
+        if initial_iter == 0:
+            print("Training from scratch")
+        else:
+            print(f"Resuming training from iteration {initial_iter}")
         train_dataset = NeRFDataset(config.train_json, config.H, config.W, train=True)
         train_loader = DataLoader(
             train_dataset,
@@ -31,39 +37,22 @@ def main(config: EZNeRFConfig):
             shuffle=True,
             generator=torch.Generator(device),
         )
-        train = train_func(coarse_model, fine_model, train_loader, optimizer)
-    if config.val_json:
-        val_dataset = NeRFDataset(config.val_json, config.H, config.W, train=False)
-        val_loader = DataLoader(
-            val_dataset, batch_size=config.H * config.W, shuffle=False
-        )
-        validate = test_func(coarse_model, fine_model, val_loader, config.output_dir)
-    if config.test_json:
-        test_dataset = NeRFDataset(config.test_json, config.H, config.W, train=False)
-        test_loader = DataLoader(
-            test_dataset, batch_size=config.H * config.W, shuffle=False
-        )
-        test = test_func(coarse_model, fine_model, test_loader, config.output_dir)
-
-    if config.train_json:
-        for epoch in range(epoch, epoch + config.epochs):
-            train(epoch) if train else None
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "coarse_model_state_dict": coarse_model.state_dict(),
-                    "fine_model_state_dict": fine_model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                },
-                f"{config.checkpoints_dir}/checkpoint_{epoch}.pt",
+        val_loader = None
+        if config.val_json:
+            val_dataset = NeRFDataset(config.val_json, config.H, config.W, train=False)
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=config.H * config.W,
+                shuffle=False,
             )
-            validate(epoch) if validate else None
-            scheduler.step()
-        print("Training complete")
-
-    if config.test_json:
-        print("Testing")
-        test(epoch) if test else None
+        iterable = InfiniteIterable(train_loader, config.iters)
+        pbar = tqdm(iterable, initial=initial_iter, total=config.iters + initial_iter)
+        train = train_batch(coarse_model, fine_model, optimizer, scheduler)
+        log = log_batch(config, coarse_model, fine_model, optimizer, pbar, val_loader)
+        for i, batch in enumerate(iterable):
+            i = i + initial_iter
+            loss, psnr, coarse_loss, fine_loss = train(batch)
+            log(loss, psnr, coarse_loss, fine_loss, i)
 
     if config.animate:
         print("Generating animation")
@@ -76,16 +65,16 @@ def resume(
     optimizer: torch.optim.Optimizer,
     checkpoint_path: str | None,
 ) -> int:
-    epoch = 0
+    iteration = 0
     checkpoint = None
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path)
         coarse_model.load_state_dict(checkpoint["coarse_model_state_dict"])
         fine_model.load_state_dict(checkpoint["fine_model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        print(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
-        epoch += checkpoint["epoch"] + 1
-    return epoch
+        print(f"Loaded checkpoint from iteration {checkpoint['iter']}")
+        iteration += checkpoint["iter"] + 1
+    return iteration
 
 
 def setup_device(config: EZNeRFConfig) -> torch.device:
@@ -108,7 +97,6 @@ if __name__ == "__main__":
     config = get_config()
     device = setup_device(config)
     wandb.init(project="eznerf", config=config, anonymous="allow")  # type: ignore
-    os.makedirs(config.output_dir, exist_ok=True)
     os.makedirs(config.checkpoints_dir, exist_ok=True)
     with device:
         main(config)
