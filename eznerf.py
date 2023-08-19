@@ -49,7 +49,7 @@ def main(config: EZNeRFConfig):
         pbar = tqdm(iterable, initial=initial_iter, total=config.iters + initial_iter)
         train = train_batch(coarse_model, fine_model, optimizer, scheduler)
         log = log_batch(config, coarse_model, fine_model, optimizer, pbar, val_loader)
-        for i, batch in enumerate(iterable):
+        for i, batch in enumerate(pbar):
             i = i + initial_iter
             loss, psnr, coarse_loss, fine_loss = train(batch)
             log(loss, psnr, coarse_loss, fine_loss, i)
