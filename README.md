@@ -19,15 +19,15 @@ The goal of EZNeRF is to thoroughly communicate all of these ideas so that a rea
 EZNeRF does not attempt to be the most efficient or performant implementation of NeRF, nor does it attempt to be the most complete. In fact, EZNeRF currently only supports synthetic scenes with provided camera poses. If you are looking for implementations that are suited for real applications, there are many other implementations and variants of NeRF that produce better results *much* faster. Check out [Nerfstudio](https://nerf.studio/) and [InstantNGP](https://github.com/NVlabs/instant-ngp) for some great examples.
 
 ## Getting Started
-EZNeRF is implemented in Python with PyTorch and a couple of other libraries. We recommend using Conda for managing dependencies in a virtual environment. [Miniforge](https://github.com/conda-forge/miniforge) is recommended, but any Conda installation should work. Alternatively, `pip` without a virtual environment should also work.
+EZNeRF is implemented in Python with PyTorch and a couple of other libraries. We recommend using Conda for managing dependencies in a virtual environment. [Miniforge](https://github.com/conda-forge/miniforge) is recommended, but any Conda installation should work. Alternatively, you can install the dependencies manually with `pip`.
 
 ### Installing Dependencies
 
 After cloning the repository, you can install the required dependencies by navigating to the root directory of the repository and running:
 ```sh
-conda env create -f environment.yml
+conda env create -f environment.yaml
 ```
-> This `environment.yml` file includes `pytorch-cuda` so that machines with NVIDIA GPUs may leverage those resources. However, if this package fails to be found or install for your system (if you are using a Mac, for example) you can remove it from the `environment.yml` file.
+> This `environment.yaml` file includes `pytorch-cuda` so that machines with NVIDIA GPUs may leverage those resources. However, if this package fails to be found or install for your system (if you are using a Mac, for example) you can remove it from the `environment.yaml` file.
 
 After creating the environment, activate it by running:
 ```sh
@@ -42,33 +42,22 @@ From the root directory of the repository, run:
 ```
 There should now be a `data` directory at the root of the repository.
 
-#### Resizing the data
-You will likely need to resize the data for faster training or reduced memory usage, as the original synthetic images are each 800x800.
-
-We provide a `resize.py` script which will resize the images to a given size. Details on the script's usage are provided in the [`resize.py` README](util/resize/README.md).
-
 ## Running EZNeRF
-Detailed documentation on the training and testing scripts can be found in the [`train.py` README](train/README.md) and [`test.py` README](test/README.md), respectively.
-
-### Pre-trained Weights
-To be made available soon.
 
 ### `eznerf.py`
-In most cases, all you will probably need to run is the combined `eznerf.py` script, which takes the following arguments:
-
-| Argument | Description | Default |
-| --- | --- | --- |
-| `--train` | If passed, enables training. | `False` |
-| `--checkpoint` | Path to the checkpoint file. | `None` |
-| `--data_json` | Path to the data JSON file. Required for training. | `None` |
+In most cases, all you will probably need to run is the combined [`eznerf.py`](./eznerf.py) script, which can take a variety of arguments. However, config files are supported, and we provide a basic config file for training the example LEGO scene in `config/lego.yaml`.
 
 #### Example Usage
 To train a model on the example data, run:
 ```sh
-python eznerf.py --train --data_json data/nerf_synthetic/lego/transforms_train.json
+python eznerf.py --config config/lego.yaml
 ```
 
-To generate an animation from the trained model, run:
-```sh
-python eznerf.py --checkpoint checkpoints/checkpoint_1000.pt
-```
+### WandB
+Once you initiate a training run, the logging tool [WandB](https://wandb.ai/site) will provide you with a link to a dashboard where you can monitor the training progress and view the results of the model. WandB may prompt you to create an account if you do not already have one, but you can proceed anonymously if you wish.
+
+### Pre-trained Weights
+To be made available soon.
+
+## Contributing
+Contributions are welcome! Please open an issue or submit a pull request if you have any suggestions or would like to contribute.
