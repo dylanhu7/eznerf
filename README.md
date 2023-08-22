@@ -1,4 +1,4 @@
-# [WIP] EZNeRF: Neural Radiance Fields Explained!
+# EZNeRF: Neural Radiance Fields Explained!
 
 ## What is a NeRF?
 In simplest terms, a neural radiance field (NeRF) represents a 3D scene as a neural network which can then be queried to *synthesize novel views* of the scene. In other words, given a set of images of a scene captured from different angles, a NeRF learns to represent the scene and can produce images of the scene from any angle. This is how we generate the videos of the scenes above from a limited set of images!
