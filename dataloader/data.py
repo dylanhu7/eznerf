@@ -1,21 +1,16 @@
 import json
+import logging
 import os
-from typing import TypedDict
 
 import torch
 import torch.utils.data
 import torchvision.transforms.functional
 from torchvision import io
-from tqdm import tqdm
+from tqdm.rich import tqdm
 
 from rays.rays import get_rays
 
-
-class JSONFrame(TypedDict):
-    """A dictionary corresponding to a frame in the NeRF dataset JSON."""
-
-    file_path: str
-    transform_matrix: list[list[float]]
+logger = logging.getLogger("eznerf.data")
 
 
 class NeRFDataset(torch.utils.data.TensorDataset):
@@ -42,12 +37,14 @@ class NeRFDataset(torch.utils.data.TensorDataset):
         with open(path, "r") as f:
             data = json.load(f)
             self.camera_angle_x: float = data["camera_angle_x"]
-            path_frames: list[JSONFrame] = data["frames"]
+            path_frames = data["frames"]
             self.ray_origins = torch.empty((H * W * len(path_frames), 3))
             self.ray_directions = torch.empty((H * W * len(path_frames), 3))
             self.ray_directions_normalized = torch.empty((H * W * len(path_frames), 3))
             self.images = torch.empty((H * W * len(path_frames), 3))
-            print(f"Loading {len(path_frames)} frames from {path}")
+            logger.info(
+                f"Loading [bold]{len(path_frames)}[/] frames from [cyan]{path}[/]"
+            )
             for index, frame in enumerate(tqdm(path_frames)):
                 base_path = os.path.join(
                     os.path.dirname(self.path), os.path.relpath(frame["file_path"])
@@ -64,15 +61,15 @@ class NeRFDataset(torch.utils.data.TensorDataset):
                 ray_origins, ray_directions, directions_normalized = get_rays(
                     image.shape[0], image.shape[1], self.camera_angle_x, pose_matrix
                 )
-                self.ray_origins[
-                    index * H * W : (index + 1) * H * W
-                ] = ray_origins.reshape(-1, 3)
-                self.ray_directions[
-                    index * H * W : (index + 1) * H * W
-                ] = ray_directions.reshape(-1, 3)
-                self.ray_directions_normalized[
-                    index * H * W : (index + 1) * H * W
-                ] = directions_normalized.reshape(-1, 3)
+                self.ray_origins[index * H * W : (index + 1) * H * W] = (
+                    ray_origins.reshape(-1, 3)
+                )
+                self.ray_directions[index * H * W : (index + 1) * H * W] = (
+                    ray_directions.reshape(-1, 3)
+                )
+                self.ray_directions_normalized[index * H * W : (index + 1) * H * W] = (
+                    directions_normalized.reshape(-1, 3)
+                )
                 self.images[index * H * W : (index + 1) * H * W] = image.reshape(-1, 3)
 
     def __len__(self):

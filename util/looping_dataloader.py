@@ -1,18 +1,18 @@
 from torch.utils.data import DataLoader
 
 
-class InfiniteIterable:
-    def __init__(self, loader: DataLoader, max_iter: int | None = None):
+class LoopingDataLoader[T](DataLoader[T]):
+    def __init__(self, loader: DataLoader[T], max_iter: int | None = None):
         self.loader = loader
         self.max_iter = max_iter
-        self.iterator_container = [iter(self.loader)]
+        self.iterator = iter(self.loader)
 
     def get_next(self):
         try:
-            return next(self.iterator_container[0])
+            return next(self.iterator)
         except StopIteration:
-            self.iterator_container[0] = iter(self.loader)
-            return next(self.iterator_container[0])
+            self.iterator = iter(self.loader)
+            return next(self.iterator)
 
     def __iter__(self):
         count = 0

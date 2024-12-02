@@ -1,6 +1,8 @@
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from model.model import NeRF
+from sample.sample import sample_hierarchical, sample_stratified
 
 
 def volume_render(
@@ -56,3 +58,51 @@ def cumprod_exclusive(x: Tensor, dim: int) -> Tensor:
     return torch.cumprod(
         torch.cat([torch.ones_like(x[..., :1]), x[..., :-1]], dim=dim), dim=dim
     )
+
+
+def query_nerf(
+    model: NeRF, points: Tensor, ray_directions_normalized: Tensor
+) -> tuple[Tensor, Tensor]:
+    # [batch_size, 3] -> [batch_size, num_samples_stratified, 3]
+    ray_directions_normalized = ray_directions_normalized[..., None, :].expand_as(
+        points
+    )
+    return model(points, ray_directions_normalized)
+
+
+def render_rays(
+    coarse_model: NeRF,
+    fine_model: NeRF,
+    ray_origins: Tensor,
+    ray_directions: Tensor,
+    ray_directions_normalized: Tensor,
+    train: bool,
+) -> tuple[Tensor, Tensor]:
+    # Sample points
+    points, z = sample_stratified(ray_origins, ray_directions, 2, 6, 64)
+
+    # Encode and forward pass
+    rgb, sigma = query_nerf(coarse_model, points, ray_directions_normalized)
+
+    # Volume render to obtain weights
+    rgb_coarse, weights = volume_render(rgb, sigma, z)
+
+    # Sample according to weights
+    points_hierarchical, z_hierarchical = sample_hierarchical(
+        ray_origins, ray_directions, z, weights, 128, train
+    )
+    z_hierarchical = z_hierarchical.detach()
+
+    # Sort z values and gather points accordingly
+    z, indices = torch.sort(torch.cat([z, z_hierarchical], -1), -1)
+    points = torch.cat([points, points_hierarchical], -2)
+    indices = indices[..., None].expand_as(points)
+    points = torch.gather(points, -2, indices)
+
+    # Encode and forward pass again
+    rgb, sigma = query_nerf(fine_model, points, ray_directions_normalized)
+
+    # Volume render to obtain final pixel colors
+    rgb_fine, _ = volume_render(rgb, sigma, z)
+
+    return rgb_coarse, rgb_fine

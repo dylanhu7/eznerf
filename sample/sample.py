@@ -97,8 +97,8 @@ def sample_hierarchical(
 
     # Perturb t values by a random amount within the stratum
     # [image_height, image_width, num_samples]
-    # if train:
-    # z += torch.rand_like(z) * deltas
+    if train:
+        z += torch.rand_like(z) * deltas
 
     # [image_height, image_width, num_samples, 3], [image_height, image_width, num_samples]
     return ray_origins[..., None, :] + z[..., None] * ray_directions[..., None, :], z
