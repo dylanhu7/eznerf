@@ -61,7 +61,7 @@ We provide a `resize.py` script which will resize the images to a given size. De
 In most cases, all you will probably need to run is the combined `eznerf.py` script. You can see the full list of arguments, their descriptions, and default values by running:
 
 ```sh
-uv run eznerf.py -- --help
+uv run eznerf.py --help
 ```
 
 #### Example Usage
