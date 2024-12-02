@@ -56,12 +56,6 @@ We provide a `resize.py` script which will resize the images to a given size. De
 
 ## Running EZNeRF
 
-Detailed documentation on the training and testing scripts can be found in the [`train.py` README](train/README.md) and [`test.py` README](test/README.md), respectively.
-
-### Pre-trained Weights
-
-To be made available soon.
-
 ### `eznerf.py`
 
 In most cases, all you will probably need to run is the combined `eznerf.py` script. You can see the full list of arguments, their descriptions, and default values by running:
@@ -87,3 +81,7 @@ The code allows for anonymous logging by default, but you can specify your own W
 ```sh
 uv run wandb login
 ```
+
+### Pre-trained Weights
+
+To be made available soon.
