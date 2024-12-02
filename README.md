@@ -48,12 +48,6 @@ From the root directory of the repository, run:
 
 There should now be a `data` directory at the root of the repository.
 
-#### Resizing the data
-
-You will likely need to resize the data for faster training or reduced memory usage, as the original synthetic images are each 800x800.
-
-We provide a `resize.py` script which will resize the images to a given size. Details on the script's usage are provided in the [`resize.py` README](util/resize/README.md).
-
 ## Running EZNeRF
 
 ### `eznerf.py`
@@ -63,6 +57,9 @@ In most cases, all you will probably need to run is the combined `eznerf.py` scr
 ```sh
 uv run eznerf.py --help
 ```
+
+> [!IMPORTANT]
+> You might want to resize the images at runtime to reduce memory usage or speed up training. You can do this by passing the `--h` and `--w` arguments to the script.
 
 #### Example Usage
 
