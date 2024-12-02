@@ -1,7 +1,7 @@
 [project]
 name = "eznerf"
 version = "0.1.0"
-description = "Add your description here"
+description = "An organized, documented, educational implementation of NeRF in PyTorch"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
