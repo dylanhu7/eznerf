@@ -24,6 +24,14 @@ EZNeRF does not attempt to be the most efficient or performant implementation of
 
 EZNeRF is implemented in Python with PyTorch and a couple of other libraries. This project uses [`uv`](https://github.com/astral-sh/uv), a fast Python package and project manager. It has a similar interface to `pip`, but it also helps create virtual environments (like `conda`) and has reproducible dependency management with a [lockfile](uv.lock).
 
+If you would prefer not to install `uv` and use a different solution, the required dependencies are:
+
+- `pytorch`
+- `torchvision`
+- `tqdm`
+- `wandb`
+- `typer`
+
 ### Installing Dependencies
 
 After cloning the repository, you can install the required dependencies by navigating to the root directory of the repository and running:

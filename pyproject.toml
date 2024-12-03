@@ -5,9 +5,14 @@ description = "An organized, documented, educational implementation of NeRF in P
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.5.1",
-    "torchvision>=0.20.1",
-    "tqdm>=4.67.1",
-    "typer>=0.14.0",
-    "wandb>=0.18.7",
+  "torch>=2.5.1",
+  "torchvision>=0.20.1",
+  "tqdm>=4.67.1",
+  "typer>=0.14.0",
+  "wandb>=0.18.7",
 ]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
