@@ -8,15 +8,20 @@ def sample_stratified(
     near: float,
     far: float,
     num_samples: int,
+    train: bool,
 ) -> tuple[Tensor, Tensor]:
-    """Randomly samples points along the given rays by dividing the rays into even strata and randomly sampling one point per stratum.
+    """Samples points along the given rays by dividing the rays into even strata and taking one point per stratum.
+
+    When training, the point is chosen randomly within each stratum. When rendering, the midpoint of each
+    stratum is used, so that the rendered image does not depend on random numbers.
 
     Args:
         ray_origins (Tensor): A tensor of ray origins of shape [image_height, image_width, 3].
         ray_directions (Tensor): A tensor of non-normalized ray directions of shape [image_height, image_width, 3].
         near (float): The near plane.
         far (float): The far plane.
-        num_samples (int): The number of samples (and the number of strata, as we randomly sample 1 point per stratum).
+        num_samples (int): The number of samples (and the number of strata, as we sample 1 point per stratum).
+        train (bool): Whether to randomly jitter the sample within each stratum.
 
     Returns:
         Tensor: A tensor of points of shape [image_height, image_width, num_samples, 3].
@@ -35,9 +40,12 @@ def sample_stratified(
     # [image_height, image_width, num_samples]
     strata_starts = strata_starts.expand(ray_origins.shape[:-1] + (num_samples,))
 
-    # Randomly sample one point per stratum
+    # Sample one point per stratum: random when training, the midpoint when rendering
     # [image_height, image_width, num_samples]
-    z = strata_starts + torch.rand_like(strata_starts) * stratum_width
+    if train:
+        z = strata_starts + torch.rand_like(strata_starts) * stratum_width
+    else:
+        z = strata_starts + 0.5 * stratum_width
 
     # [image_height, image_width, num_samples, 3], [image_height, image_width, num_samples]
     return ray_origins[..., None, :] + z[..., :, None] * ray_directions[..., None, :], z
@@ -59,22 +67,30 @@ def sample_hierarchical(
         z (Tensor): A tensor of z values of shape [image_height, image_width, num_samples_stratified].
         weights (Tensor): A tensor of weights of shape [image_height, image_width, num_samples_stratified - 1].
         num_samples (int): The number of samples to take.
+        train (bool): Whether to draw the samples randomly (training) or evenly spaced in probability (rendering).
 
     Returns:
         Tensor: A tensor of t-values of shape [image_height, image_width, num_samples, 3].
     """
+    # Width of the interval between each pair of consecutive stratified samples.
+    # weights[i] is the weight of the interval [z[i], z[i + 1]].
     # [image_height, image_width, num_samples_stratified - 1]
     deltas = z[..., 1:] - z[..., :-1]
 
-    # Generate pdf by normalizing weights
+    # Generate pmf over the intervals by normalizing weights.
+    # The small constant keeps the pmf well defined (uniform) for rays where
+    # the coarse network sees nothing and every weight is exactly zero.
     # [image_height, image_width, num_samples_stratified - 1]
+    weights = weights + 1e-5
     pmf = weights / torch.sum(weights, dim=-1, keepdim=True)
 
-    # Generate cdf by cumulatively summing pdf
+    # Generate cdf by cumulatively summing pmf
+    # cdf[i] is the value of the cdf at the END of interval i
     # [image_height, image_width, num_samples_stratified - 1]
     cdf = torch.cumsum(pmf, dim=-1)
 
-    # Generate random samples from uniform distribution
+    # Generate samples from uniform distribution: random when training,
+    # evenly spaced when rendering
     # [image_height, image_width, num_samples]
     if train:
         u = torch.rand(cdf.shape[:-1] + (num_samples,))
@@ -82,23 +98,27 @@ def sample_hierarchical(
         u = torch.linspace(0.0, 1.0, steps=num_samples)
         u = u.expand(cdf.shape[:-1] + (num_samples,))
 
-    # Find indices in the cdf of where u would be inserted
+    # Find the interval each u falls into
     # [image_height, image_width, num_samples]
     u = u.contiguous()
     indices = torch.searchsorted(cdf, u)
     # Clamp indices to be within bounds
     indices = torch.clamp(indices, 0, cdf.shape[-1] - 1)
 
-    # Find the t-values corresponding to the indices
+    # Invert the cdf within the interval. The cdf rises linearly from
+    # (cdf - pmf) to cdf across the interval, so the fraction of the way
+    # through the interval is how far u is between those two values.
+    # [image_height, image_width, num_samples]
+    cdf_end = torch.gather(cdf, dim=-1, index=indices)
+    interval_pmf = torch.gather(pmf, dim=-1, index=indices)
+    fraction = torch.clamp((u - (cdf_end - interval_pmf)) / interval_pmf, 0.0, 1.0)
+
+    # Find the t-values corresponding to the start of each chosen interval
+    # and move the fraction of the way through it
     # [image_height, image_width, num_samples]
     z = torch.gather(z, dim=-1, index=indices)
-    # [image_height, image_width, num_samples]
     deltas = torch.gather(deltas, dim=-1, index=indices)
-
-    # Perturb t values by a random amount within the stratum
-    # [image_height, image_width, num_samples]
-    if train:
-        z += torch.rand_like(z) * deltas
+    z = z + fraction * deltas
 
     # [image_height, image_width, num_samples, 3], [image_height, image_width, num_samples]
     return ray_origins[..., None, :] + z[..., None] * ray_directions[..., None, :], z

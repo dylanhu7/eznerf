@@ -22,6 +22,7 @@ We use stratified random sampling rather than simply sampling uniformly along th
 | `near`        | `float`  | The near plane of the camera.                                                                                   |
 | `far`         | `float`  | The far plane of the camera.                                                                                    |
 | `num_samples` | `int`    | The number of samples to take along each ray.                                                                   |
+| `train`       | `bool`   | Whether to randomly jitter each sample within its stratum (training) or use the stratum midpoint (rendering).   |
 
 We first break down the rays tensor into the origins (which are all the camera position) and the directions:
 
@@ -51,8 +52,16 @@ strata = torch.linspace(near, far - stratum_width, num_samples)
 We then use [`torch.rand_like`](https://pytorch.org/docs/stable/generated/torch.rand_like.html) to generate a tensor of shape `[num_samples]` which represent the offset of each sample within each stratum. We then add this offset to the beginning of each stratum to get the $t$ values of each sample:
 
 ```py
-t = strata + torch.rand_like(strata) * stratum_width
+if train:
+    t = strata + torch.rand_like(strata) * stratum_width
+else:
+    t = strata + 0.5 * stratum_width
 ```
+
+> [!IMPORTANT]
+> The random jitter is only for training. When rendering an image we take the midpoint of each stratum instead, so every ray is sampled the same way.
+>
+> If we kept the jitter while rendering, each pixel would get its own random set of 64 samples with gaps anywhere between 0 and twice the stratum width. Every so often a ray's samples would straddle a thin surface without landing on it, the coarse network would report nothing there, and that one pixel would come out dark. Across an image this shows up as a sprinkle of black "static" on the object which changes every time you render.
 
 Finally, we compute the position of each sample along the ray by multiplying the direction of the ray by the $t$ value and adding the origin:
 
@@ -133,12 +142,18 @@ One can think of inverse transform sampling as choosing values in the range of t
 | `deltas`      | `Tensor` | A tensor of shape `[num_samples_stratified - 1]` containing the differences between consecutive $t$ values (stratum widths). |
 | `weights`     | `Tensor` | A tensor of shape `[num_rays, image_width, image_height, num_samples - 1]` containing the weights of each stratum.           |
 | `num_samples` | `int`    | The number of hierarchical samples to generate.                                                                              |
+| `train`       | `bool`   | Whether to draw the samples randomly (training) or evenly spaced in probability (rendering).                                 |
 
-From our discrete set of $\delta$ values and their corresponding weights, we can generate a probability mass function. We do this by normalizing the weights so that they sum to 1 (as all probabilities in a PMF must sum to 1):
+Each weight belongs to the interval between two consecutive stratified samples: `weights[i]` is the weight of the interval from `t[i]` to `t[i + 1]`, whose width is `deltas[i]`.
+
+From these intervals and their corresponding weights, we can generate a probability mass function. We do this by normalizing the weights so that they sum to 1 (as all probabilities in a PMF must sum to 1):
 
 ```py
-pmf = (weights / torch.sum(weights, dim=-1, keepdim=True))
+weights = weights + 1e-5
+pmf = weights / torch.sum(weights, dim=-1, keepdim=True)
 ```
+
+> The small constant is there for rays which pass through empty space. The coarse network can return a weight of exactly zero for every interval on such a ray, and normalizing would then divide zero by zero. With the constant, the PMF for those rays is simply uniform.
 
 Next, we compute the cumulative distribution function (CDF) of the PMF by taking the cumulative sum of the normalized weights:
 
@@ -146,13 +161,17 @@ Next, we compute the cumulative distribution function (CDF) of the PMF by taking
 cdf = torch.cumsum(pmf, dim=0)
 ```
 
-Then, we generate a uniform random number between 0 and 1 for each ray:
+Then, we generate `num_samples` numbers between 0 and 1 for each ray. When training these are uniformly random, and when rendering they are evenly spaced so that the image does not depend on random numbers:
 
 ```py
-u = torch.rand(cdf.shape[:-1] + (num_samples,))
+if train:
+    u = torch.rand(cdf.shape[:-1] + (num_samples,))
+else:
+    u = torch.linspace(0.0, 1.0, steps=num_samples)
+    u = u.expand(cdf.shape[:-1] + (num_samples,))
 ```
 
-Finally, we do a search using [`torch.searchsorted`](https://pytorch.org/docs/stable/generated/torch.searchsorted.html) on the CDF to find the corresponding sample indices:
+Next, we do a search using [`torch.searchsorted`](https://pytorch.org/docs/stable/generated/torch.searchsorted.html) on the CDF to find which interval each number falls into:
 
 ```py
 indices = torch.searchsorted(cdf, u)
@@ -164,18 +183,24 @@ We must clamp the indices to ensure that they are within the bounds of the CDF:
 indices = torch.clamp(indices, 0, cdf.shape[-1] - 1)
 ```
 
-We then use the indices to select the corresponding $t$ and $\delta$ values:
+Knowing the interval is not enough, as we also need a position _within_ it. We treat the probability as spread evenly across each interval, which means the CDF rises in a straight line from `cdf - pmf` at the start of the interval to `cdf` at its end. How far `u` sits between those two values is therefore how far through the interval the sample should be:
+
+```py
+cdf_end = torch.gather(cdf, dim=-1, index=indices)
+interval_pmf = torch.gather(pmf, dim=-1, index=indices)
+fraction = torch.clamp((u - (cdf_end - interval_pmf)) / interval_pmf, 0.0, 1.0)
+```
+
+We then use the indices to select the $t$ value at the start of each chosen interval and its width $\delta$, and move that fraction of the way through:
 
 ```py
 t = torch.gather(t, dim=-1, index=indices)
 deltas = torch.gather(deltas, dim=-1, index=indices)
+t = t + fraction * deltas
 ```
 
-Then, we perturb the $t$ values by adding a random number between 0 and the corresponding $\delta$:
-
-```py
-t += torch.rand_like(t) * deltas
-```
+> [!IMPORTANT]
+> This step is what makes the samples land _between_ the stratified samples. If we stopped at `t = torch.gather(t, ...)`, every hierarchical sample would sit exactly on top of a stratified sample we have already evaluated, and the fine network would learn nothing new about where the surface is inside the interval.
 
 Finally, we compute the position of each sample along the ray by multiplying the direction of the ray by the $t$ value and adding the origin:
 

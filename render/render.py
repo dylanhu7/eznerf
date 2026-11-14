@@ -79,7 +79,7 @@ def render_rays(
     train: bool,
 ) -> tuple[Tensor, Tensor]:
     # Sample points
-    points, z = sample_stratified(ray_origins, ray_directions, 2, 6, 64)
+    points, z = sample_stratified(ray_origins, ray_directions, 2, 6, 64, train)
 
     # Encode and forward pass
     rgb, sigma = query_nerf(coarse_model, points, ray_directions_normalized)
